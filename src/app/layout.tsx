@@ -1,49 +1,29 @@
-import {
-  ClerkProvider,
-  SignInButton,
-  SignedIn,
-  SignedOut,
-  UserButton
-} from '@clerk/nextjs'
-import Link from 'next/link'
-import './globals.css'
+import { ClerkProvider } from '@clerk/nextjs';
+import './globals.css';
+import Header from './components/Header';
 
 export const metadata = {
-  title: 'Next.js with Clerk Auth',
-  description: 'A Next.js app with Clerk authentication',
-}
+  title: 'DreamBee - AI Video Scene Generation',
+  description: 'Direct your vision with AI. Create stunning video scenes through AI collaboration.',
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <ClerkProvider>
       <html lang="en">
-        <body>
-          <header className="flex justify-between items-center p-4 bg-white shadow-sm">
-            <Link href="/" className="text-xl font-bold">My App</Link>
-            <nav className="flex items-center space-x-4">
-              <SignedIn>
-                <Link 
-                  href="/profile" 
-                  className="text-gray-600 hover:text-gray-900"
-                >
-                  My Account
-                </Link>
-                <UserButton afterSignOutUrl="/" />
-              </SignedIn>
-              <SignedOut>
-                <SignInButton mode="modal" />
-              </SignedOut>
-            </nav>
-          </header>
-          <main>
-            {children}
-          </main>
+        <body className="min-h-screen bg-black text-white">
+          <div className="flex flex-col min-h-screen">
+            <Header />
+            <main className="flex-grow">
+              {children}
+            </main>
+          </div>
         </body>
       </html>
     </ClerkProvider>
-  )
+  );
 }
