@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "duration": 15.646231006024703,
+    "speakers": [
+      "adam",
+      "sarah"
+    ],
+    "turnCount": 4
+  },
+  "turns": [
+    {
+      "speaker": "adam",
+      "text": "I can't believe what just happened!  Did you see that amazing sunset?",
+      "startTime": 0.2,
+      "endTime": 3.8734619140625
+    },
+    {
+      "speaker": "sarah",
+      "text": "Yes...  The colors were absolutely breathtaking.",
+      "startTime": 4.2734619140625005,
+      "endTime": 8.023461914062501
+    },
+    {
+      "speaker": "adam",
+      "text": "And look at those clouds!  They're glowing like fire in the sky!",
+      "startTime": 8.42632728702734,
+      "endTime": 12.35485511905859
+    },
+    {
+      "speaker": "sarah",
+      "text": "Nature can be so beautiful  it leaves you speechless.",
+      "startTime": 12.763601611493453,
+      "endTime": 15.646231006024703
+    }
+  ]
+}
