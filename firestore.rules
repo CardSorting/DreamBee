@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is accessing their own data
+    function isUserOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Allow read/write only to their own document
+      allow read, write: if isUserOwner(userId);
+      
+      // User's subcollections
+      match /{document=**} {
+        allow read, write: if isUserOwner(userId);
+      }
+    }
+
+    // Public data that any authenticated user can read
+    match /public/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if false;  // Only admins can write (managed through Firebase Console)
+    }
+  }
+}

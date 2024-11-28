@@ -1,4 +1,3 @@
-import Footer from "./components/Footer";
 import HeroSection from "./components/HeroSection";
 
 export default function Home() {
@@ -81,7 +80,6 @@ export default function Home() {
           </div>
         </section>
       </main>
-      <Footer />
     </div>
   );
 }
