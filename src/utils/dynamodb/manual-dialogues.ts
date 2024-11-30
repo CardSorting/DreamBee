@@ -9,7 +9,8 @@ import {
   ChunkMetadata,
   ChunkProcessingMetadata,
   DialogueChunkItem,
-  MergedAudioData
+  MergedAudioData,
+  DialogueSession
 } from '@/utils/dynamodb/types'
 
 const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE || 'manual-dialogues'
@@ -31,112 +32,96 @@ interface ManualDialogueData {
   updatedAt?: string
 }
 
-export async function createDialogueChunk(
+export async function createDialogueSession(
   userId: string,
   dialogueId: string,
-  chunkIndex: number,
-  data: {
-    title: string
-    description: string
-    characters: CharacterVoice[]
-    dialogue: DialogueTurn[]
-    metadata: DialogueChunkMetadata
-  }
-): Promise<boolean> {
+  sessionData: Omit<DialogueSession, 'sessionId' | 'createdAt'>
+): Promise<string> {
   try {
-    console.log(`[DynamoDB] Creating dialogue chunk ${chunkIndex} for dialogue: ${dialogueId}`)
-    const now = new Date().toISOString()
-    
-    const item: DialogueChunkItem = {
-      pk: `USER#${userId}`,
-      sk: `MDLG#${dialogueId}#CHUNK#${chunkIndex}`,
-      type: 'DIALOGUE_CHUNK',
-      userId,
-      dialogueId,
-      chunkIndex,
-      status: 'pending',
-      metadata: data.metadata,
-      createdAt: now,
-      updatedAt: now,
-      sortKey: now
+    const sessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const session: DialogueSession = {
+      ...sessionData,
+      sessionId,
+      createdAt: Date.now()
     }
 
-    const command = new PutCommand({
+    const command = new UpdateCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
-      Item: item
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `MDLG#${dialogueId}`,
+      },
+      UpdateExpression: 'SET #sessions = list_append(if_not_exists(#sessions, :empty_list), :session), #lastSessionId = :sessionId, #updatedAt = :updatedAt',
+      ExpressionAttributeNames: {
+        '#sessions': 'sessions',
+        '#lastSessionId': 'lastSessionId',
+        '#updatedAt': 'updatedAt'
+      },
+      ExpressionAttributeValues: {
+        ':session': [session],
+        ':empty_list': [],
+        ':sessionId': sessionId,
+        ':updatedAt': new Date().toISOString()
+      },
+      ReturnValues: 'ALL_NEW'
     })
 
     await docClient.send(command)
-    console.log(`[DynamoDB] Dialogue chunk ${chunkIndex} created successfully`)
-    return true
+    return sessionId
   } catch (error) {
-    console.error('[DynamoDB] Error creating dialogue chunk:', error)
+    console.error('[DynamoDB] Error creating dialogue session:', error)
     throw error
   }
 }
 
-export async function updateDialogueChunk(
+export async function updateDialogueSession(
   userId: string,
   dialogueId: string,
-  chunkIndex: number,
-  updates: Partial<ChunkProcessingMetadata>
-) {
+  sessionId: string,
+  updates: Partial<DialogueSession>
+): Promise<void> {
   try {
-    console.log(`[DynamoDB] Updating dialogue chunk ${chunkIndex} for dialogue: ${dialogueId}`)
+    const dialogue = await getManualDialogue(userId, dialogueId)
+    if (!dialogue) {
+      throw new Error('Dialogue not found')
+    }
+
+    const sessionIndex = dialogue.sessions.findIndex(s => s.sessionId === sessionId)
+    if (sessionIndex === -1) {
+      throw new Error('Session not found')
+    }
+
     const updateExpressions: string[] = []
     const expressionAttributeNames: Record<string, string> = {}
     const expressionAttributeValues: Record<string, any> = {}
 
     Object.entries(updates).forEach(([key, value]) => {
       if (value !== undefined) {
-        updateExpressions.push(`#${key} = :${key}`)
+        updateExpressions.push(`#sessions[${sessionIndex}].#${key} = :${key}`)
         expressionAttributeNames[`#${key}`] = key
         expressionAttributeValues[`:${key}`] = value
       }
     })
 
-    const now = new Date().toISOString()
+    expressionAttributeNames['#sessions'] = 'sessions'
+    expressionAttributeValues[':updatedAt'] = new Date().toISOString()
     updateExpressions.push('#updatedAt = :updatedAt')
     expressionAttributeNames['#updatedAt'] = 'updatedAt'
-    expressionAttributeValues[':updatedAt'] = now
 
     const command = new UpdateCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
       Key: {
         pk: `USER#${userId}`,
-        sk: `MDLG#${dialogueId}#CHUNK#${chunkIndex}`,
+        sk: `MDLG#${dialogueId}`,
       },
       UpdateExpression: `SET ${updateExpressions.join(', ')}`,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
-      ReturnValues: 'ALL_NEW',
     })
 
-    const response = await docClient.send(command)
-    return response.Attributes as DialogueChunkItem
+    await docClient.send(command)
   } catch (error) {
-    console.error('[DynamoDB] Error updating dialogue chunk:', error)
-    throw error
-  }
-}
-
-export async function getDialogueChunks(userId: string, dialogueId: string) {
-  try {
-    console.log(`[DynamoDB] Getting chunks for dialogue: ${dialogueId}`)
-    const command = new QueryCommand({
-      TableName: MANUAL_DIALOGUES_TABLE,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
-      ExpressionAttributeValues: {
-        ':pk': `USER#${userId}`,
-        ':sk': `MDLG#${dialogueId}#CHUNK#`,
-      },
-      ScanIndexForward: true, // Sort in ascending order by chunk index
-    })
-
-    const response = await docClient.send(command)
-    return (response.Items || []) as DialogueChunkItem[]
-  } catch (error) {
-    console.error('[DynamoDB] Error getting dialogue chunks:', error)
+    console.error('[DynamoDB] Error updating dialogue session:', error)
     throw error
   }
 }
@@ -163,6 +148,7 @@ export async function createManualDialogue(data: ManualDialogueData) {
         completedChunks: 0,
         totalChunks: 1
       },
+      sessions: [],
       createdAt: now,
       updatedAt: now,
       sortKey: now
@@ -231,19 +217,31 @@ export async function updateManualDialogue(data: Partial<ManualDialogueData> & {
 export async function updateManualDialogueMergedAudio(
   userId: string,
   dialogueId: string,
+  sessionId: string,
   mergedAudio: MergedAudioData
 ) {
   try {
     console.log('[DynamoDB] Updating merged audio for dialogue:', dialogueId)
     
+    const dialogue = await getManualDialogue(userId, dialogueId)
+    if (!dialogue) {
+      throw new Error('Dialogue not found')
+    }
+
+    const sessionIndex = dialogue.sessions.findIndex(s => s.sessionId === sessionId)
+    if (sessionIndex === -1) {
+      throw new Error('Session not found')
+    }
+
     const command = new UpdateCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
       Key: {
         pk: `USER#${userId}`,
         sk: `MDLG#${dialogueId}`,
       },
-      UpdateExpression: 'SET #mergedAudio = :mergedAudio, #updatedAt = :updatedAt',
+      UpdateExpression: 'SET #sessions[${sessionIndex}].#mergedAudio = :mergedAudio, #updatedAt = :updatedAt',
       ExpressionAttributeNames: {
+        '#sessions': 'sessions',
         '#mergedAudio': 'mergedAudio',
         '#updatedAt': 'updatedAt'
       },
@@ -298,6 +296,41 @@ export async function getManualDialogues(userId: string) {
     return (response.Items || []) as ManualDialogueItem[]
   } catch (error) {
     console.error('[DynamoDB] Error getting manual dialogues:', error)
+    throw error
+  }
+}
+
+export async function getDialogueSession(
+  userId: string,
+  dialogueId: string,
+  sessionId: string
+): Promise<DialogueSession | undefined> {
+  try {
+    const dialogue = await getManualDialogue(userId, dialogueId)
+    if (!dialogue) {
+      return undefined
+    }
+
+    return dialogue.sessions.find(s => s.sessionId === sessionId)
+  } catch (error) {
+    console.error('[DynamoDB] Error getting dialogue session:', error)
+    throw error
+  }
+}
+
+export async function getDialogueSessions(
+  userId: string,
+  dialogueId: string
+): Promise<DialogueSession[]> {
+  try {
+    const dialogue = await getManualDialogue(userId, dialogueId)
+    if (!dialogue) {
+      return []
+    }
+
+    return dialogue.sessions
+  } catch (error) {
+    console.error('[DynamoDB] Error getting dialogue sessions:', error)
     throw error
   }
 }

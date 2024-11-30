@@ -20,6 +20,29 @@ export interface MergedAudioData {
   }[]
 }
 
+export interface DialogueSession {
+  sessionId: string
+  createdAt: number
+  title: string
+  description: string
+  characters: {
+    customName: string
+    voiceId: string
+    gender: 'male' | 'female'
+  }[]
+  dialogue: {
+    character: string
+    text: string
+  }[]
+  audioSegments?: AudioSegment[]
+  mergedAudio?: MergedAudioData
+  metadata: {
+    totalDuration: number
+    turnCount: number
+    status: 'processing' | 'completed' | 'error'
+  }
+}
+
 export interface BaseItem {
   pk: string
   sk: string
@@ -99,6 +122,8 @@ export interface ManualDialogueItem extends BaseItem {
     completedChunks?: number
     totalChunks?: number
   }
+  sessions: DialogueSession[]
+  lastSessionId?: string
 }
 
 export interface DialogueTurn {
