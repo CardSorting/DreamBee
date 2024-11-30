@@ -1,65 +1,62 @@
-import { NextResponse, NextRequest } from 'next/server'
-import { getAuth } from '@clerk/nextjs/server'
-import { createOrUpdateUser, getUser } from '@/utils/dynamodb'
+import { NextRequest, NextResponse } from 'next/server'
+import { docClient } from '@/utils/dynamodb/client'
+import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
 
-export async function POST(request: NextRequest) {
+const USERS_TABLE = process.env.DYNAMODB_USERS_TABLE || 'users'
+
+export async function POST(req: NextRequest) {
   try {
-    const auth = getAuth(request)
-    const { userId } = auth
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
-    }
+    const data = await req.json()
+    const { clerkId } = data
 
-    const data = await request.json()
-    if (data.clerkId !== userId) {
-      return new NextResponse('Invalid user ID', { status: 400 })
-    }
-
-    // Create or update user in DynamoDB
-    await createOrUpdateUser({
-      clerkId: userId,
-      email: data.email,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      imageUrl: data.imageUrl,
+    // Check if user already exists
+    const getCommand = new GetCommand({
+      TableName: USERS_TABLE,
+      Key: {
+        pk: `USER#${clerkId}`,
+        sk: 'PROFILE'
+      }
     })
 
-    return NextResponse.json({ success: true })
+    const existingUser = await docClient.send(getCommand)
+    if (existingUser.Item) {
+      // User exists, only update if data has changed
+      const currentData = existingUser.Item
+      const hasChanges = Object.entries(data).some(([key, value]) => currentData[key] !== value)
+      
+      if (!hasChanges) {
+        return NextResponse.json({ message: 'No changes needed' })
+      }
+    }
+
+    // Create or update user
+    console.log('[DynamoDB] Creating/updating user:', clerkId)
+    const now = new Date().toISOString()
+
+    const item = {
+      pk: `USER#${clerkId}`,
+      sk: 'PROFILE',
+      type: 'USER',
+      ...data,
+      createdAt: existingUser.Item?.createdAt || now,
+      updatedAt: now,
+      sortKey: now
+    }
+
+    const command = new PutCommand({
+      TableName: USERS_TABLE,
+      Item: item
+    })
+
+    await docClient.send(command)
+    console.log('[DynamoDB] User created/updated successfully')
+
+    return NextResponse.json({ message: 'User data synced successfully' })
   } catch (error) {
-    console.error('[User API] Error:', error)
-    if (error instanceof Error) {
-      console.error('[User API] Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
-    }
-    return new NextResponse('Internal Server Error', { status: 500 })
-  }
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const auth = getAuth(request)
-    const { userId } = auth
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
-    }
-
-    // Get user from DynamoDB
-    const user = await getUser(userId)
-    if (!user) {
-      return new NextResponse('User not found', { status: 404 })
-    }
-
-    return NextResponse.json(user)
-  } catch (error) {
-    console.error('[User API] Error:', error)
-    if (error instanceof Error) {
-      console.error('[User API] Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
-    }
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[DynamoDB] Error syncing user data:', error)
+    return NextResponse.json(
+      { error: 'Failed to sync user data' },
+      { status: 500 }
+    )
   }
 }
