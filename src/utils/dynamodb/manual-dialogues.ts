@@ -15,6 +15,14 @@ import {
 
 const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE || 'manual-dialogues'
 
+// Log environment setup
+console.log('[Manual Dialogues] Environment check:', {
+  hasTableName: !!process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE,
+  tableName: MANUAL_DIALOGUES_TABLE,
+  nodeEnv: process.env.NODE_ENV,
+  isServer: typeof window === 'undefined'
+})
+
 interface ManualDialogueData {
   userId: string
   dialogueId: string
@@ -38,12 +46,32 @@ interface PaginatedSessions {
   hasMore: boolean
 }
 
+async function executeDynamoDBOperation<T>(
+  operation: () => Promise<T>,
+  errorContext: string
+): Promise<T> {
+  try {
+    return await operation()
+  } catch (error) {
+    console.error(`[Manual Dialogues] ${errorContext}:`, error)
+    if (error instanceof Error) {
+      if (error.message.includes('security token') || error.message.includes('credentials')) {
+        throw new Error('AWS credentials not properly configured. Please check your environment variables.')
+      }
+      if (error.message.includes('environment variables')) {
+        throw new Error('Missing required AWS configuration. Please check your .env.local file.')
+      }
+    }
+    throw error
+  }
+}
+
 export async function createDialogueSession(
   userId: string,
   dialogueId: string,
   sessionData: Omit<DialogueSession, 'sessionId' | 'createdAt'>
 ): Promise<string> {
-  try {
+  return executeDynamoDBOperation(async () => {
     const sessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     const session: DialogueSession = {
       ...sessionData,
@@ -74,10 +102,7 @@ export async function createDialogueSession(
 
     await docClient.send(command)
     return sessionId
-  } catch (error) {
-    console.error('[DynamoDB] Error creating dialogue session:', error)
-    throw error
-  }
+  }, 'Error creating dialogue session')
 }
 
 export async function updateDialogueSession(
@@ -86,7 +111,7 @@ export async function updateDialogueSession(
   sessionId: string,
   updates: Partial<DialogueSession>
 ): Promise<void> {
-  try {
+  return executeDynamoDBOperation(async () => {
     const dialogue = await getManualDialogue(userId, dialogueId)
     if (!dialogue) {
       throw new Error('Dialogue not found')
@@ -126,15 +151,12 @@ export async function updateDialogueSession(
     })
 
     await docClient.send(command)
-  } catch (error) {
-    console.error('[DynamoDB] Error updating dialogue session:', error)
-    throw error
-  }
+  }, 'Error updating dialogue session')
 }
 
 export async function createManualDialogue(data: ManualDialogueData) {
-  try {
-    console.log('[DynamoDB] Creating manual dialogue for user:', data.userId)
+  return executeDynamoDBOperation(async () => {
+    console.log('[Manual Dialogues] Creating manual dialogue for user:', data.userId)
     const { userId, dialogueId, ...rest } = data
     const now = new Date().toISOString()
     
@@ -160,115 +182,19 @@ export async function createManualDialogue(data: ManualDialogueData) {
       sortKey: now
     }
 
-    console.log('[DynamoDB] Saving manual dialogue item:', JSON.stringify(item, null, 2))
-
     const command = new PutCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
       Item: item,
     })
 
     await docClient.send(command)
-    console.log('[DynamoDB] Manual dialogue created successfully')
     return dialogueId
-  } catch (error) {
-    console.error('[DynamoDB] Error creating manual dialogue:', error)
-    throw error
-  }
-}
-
-export async function updateManualDialogue(data: Partial<ManualDialogueData> & { userId: string; dialogueId: string }) {
-  try {
-    console.log('[DynamoDB] Updating manual dialogue:', data.dialogueId)
-    const updateExpressions: string[] = []
-    const expressionAttributeNames: Record<string, string> = {}
-    const expressionAttributeValues: Record<string, any> = {}
-
-    Object.entries(data).forEach(([key, value]) => {
-      if (key !== 'userId' && key !== 'dialogueId' && key !== 'updatedAt' && value !== undefined) {
-        updateExpressions.push(`#${key} = :${key}`)
-        expressionAttributeNames[`#${key}`] = key
-        expressionAttributeValues[`:${key}`] = value
-      }
-    })
-
-    const now = new Date().toISOString()
-    updateExpressions.push('#updatedAt = :updatedAt')
-    expressionAttributeNames['#updatedAt'] = 'updatedAt'
-    expressionAttributeValues[':updatedAt'] = now
-
-    updateExpressions.push('#sortKey = :sortKey')
-    expressionAttributeNames['#sortKey'] = 'sortKey'
-    expressionAttributeValues[':sortKey'] = now
-
-    const command = new UpdateCommand({
-      TableName: MANUAL_DIALOGUES_TABLE,
-      Key: {
-        pk: `USER#${data.userId}`,
-        sk: `MDLG#${data.dialogueId}`,
-      },
-      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
-      ExpressionAttributeNames: expressionAttributeNames,
-      ExpressionAttributeValues: expressionAttributeValues,
-      ReturnValues: 'ALL_NEW',
-    })
-
-    const response = await docClient.send(command)
-    return response.Attributes as ManualDialogueItem
-  } catch (error) {
-    console.error('[DynamoDB] Error updating manual dialogue:', error)
-    throw error
-  }
-}
-
-export async function updateManualDialogueMergedAudio(
-  userId: string,
-  dialogueId: string,
-  sessionId: string,
-  mergedAudio: MergedAudioData
-) {
-  try {
-    console.log('[DynamoDB] Updating merged audio for dialogue:', dialogueId)
-    
-    const dialogue = await getManualDialogue(userId, dialogueId)
-    if (!dialogue) {
-      throw new Error('Dialogue not found')
-    }
-
-    const sessionIndex = dialogue.sessions.findIndex(s => s.sessionId === sessionId)
-    if (sessionIndex === -1) {
-      throw new Error('Session not found')
-    }
-
-    const command = new UpdateCommand({
-      TableName: MANUAL_DIALOGUES_TABLE,
-      Key: {
-        pk: `USER#${userId}`,
-        sk: `MDLG#${dialogueId}`,
-      },
-      UpdateExpression: 'SET #sessions[${sessionIndex}].#mergedAudio = :mergedAudio, #updatedAt = :updatedAt',
-      ExpressionAttributeNames: {
-        '#sessions': 'sessions',
-        '#mergedAudio': 'mergedAudio',
-        '#updatedAt': 'updatedAt'
-      },
-      ExpressionAttributeValues: {
-        ':mergedAudio': mergedAudio,
-        ':updatedAt': new Date().toISOString()
-      },
-      ReturnValues: 'ALL_NEW',
-    })
-
-    const response = await docClient.send(command)
-    return response.Attributes as ManualDialogueItem
-  } catch (error) {
-    console.error('[DynamoDB] Error updating merged audio:', error)
-    throw error
-  }
+  }, 'Error creating manual dialogue')
 }
 
 export async function getManualDialogue(userId: string, dialogueId: string) {
-  try {
-    console.log('[DynamoDB] Getting manual dialogue:', { userId, dialogueId })
+  return executeDynamoDBOperation(async () => {
+    console.log('[Manual Dialogues] Getting manual dialogue:', { userId, dialogueId })
     const command = new GetCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
       Key: {
@@ -279,15 +205,12 @@ export async function getManualDialogue(userId: string, dialogueId: string) {
 
     const response = await docClient.send(command)
     return response.Item as ManualDialogueItem | undefined
-  } catch (error) {
-    console.error('[DynamoDB] Error getting manual dialogue:', error)
-    throw error
-  }
+  }, 'Error getting manual dialogue')
 }
 
 export async function getManualDialogues(userId: string) {
-  try {
-    console.log('[DynamoDB] Getting manual dialogues for user:', userId)
+  return executeDynamoDBOperation(async () => {
+    console.log('[Manual Dialogues] Getting manual dialogues for user:', userId)
     const command = new QueryCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
@@ -300,10 +223,7 @@ export async function getManualDialogues(userId: string) {
 
     const response = await docClient.send(command)
     return (response.Items || []) as ManualDialogueItem[]
-  } catch (error) {
-    console.error('[DynamoDB] Error getting manual dialogues:', error)
-    throw error
-  }
+  }, 'Error getting manual dialogues')
 }
 
 export async function getDialogueSession(
@@ -311,17 +231,14 @@ export async function getDialogueSession(
   dialogueId: string,
   sessionId: string
 ): Promise<DialogueSession | undefined> {
-  try {
+  return executeDynamoDBOperation(async () => {
     const dialogue = await getManualDialogue(userId, dialogueId)
     if (!dialogue) {
       return undefined
     }
 
     return dialogue.sessions.find(s => s.sessionId === sessionId)
-  } catch (error) {
-    console.error('[DynamoDB] Error getting dialogue session:', error)
-    throw error
-  }
+  }, 'Error getting dialogue session')
 }
 
 export async function getDialogueSessions(
@@ -330,7 +247,7 @@ export async function getDialogueSessions(
   page: number = 1,
   pageSize: number = 12
 ): Promise<PaginatedSessions> {
-  try {
+  return executeDynamoDBOperation(async () => {
     const dialogue = await getManualDialogue(userId, dialogueId)
     if (!dialogue) {
       return {
@@ -340,7 +257,6 @@ export async function getDialogueSessions(
       }
     }
 
-    // Sort sessions by createdAt in descending order
     const sortedSessions = [...dialogue.sessions].sort((a, b) => b.createdAt - a.createdAt)
     
     const startIndex = (page - 1) * pageSize
@@ -352,8 +268,5 @@ export async function getDialogueSessions(
       totalCount: dialogue.sessions.length,
       hasMore: endIndex < dialogue.sessions.length
     }
-  } catch (error) {
-    console.error('[DynamoDB] Error getting dialogue sessions:', error)
-    throw error
-  }
+  }, 'Error getting dialogue sessions')
 }

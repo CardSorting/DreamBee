@@ -1,286 +1,235 @@
+import { 
+  PutCommand, 
+  QueryCommand, 
+  GetCommand,
+  DeleteCommand
+} from '@aws-sdk/lib-dynamodb'
 import { docClient } from './client'
-import { QueryCommand, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
-import { CONVERSATIONS_TABLE } from './index'
-import type { ChatMessage } from '../../app/types/chat'
 
-interface ConversationMetadata {
+const CONVERSATIONS_TABLE = process.env.DYNAMODB_CONVERSATIONS_TABLE || 'conversations'
+
+export interface ConversationItem {
+  pk: string
+  sk: string
+  type: 'CONVERSATION'
+  userId: string
   conversationId: string
   title: string
-  updatedAt: string
+  messages: any[]
   createdAt: string
-  messageCount: number
+  updatedAt: string
+  sortKey: string
 }
 
-interface ConversationDetails extends ConversationMetadata {
-  messages: ChatMessage[]
+export interface ConversationMetadata {
+  conversationId: string
+  title: string
+  createdAt: string
+  updatedAt: string
 }
 
-interface PaginationParams {
-  limit?: number
-  lastEvaluatedKey?: Record<string, any>
+export interface ConversationDetails extends ConversationMetadata {
+  messages: any[]
 }
 
-// Helper function to parse DynamoDB message format
-function parseMessage(msg: any): ChatMessage {
-  try {
-    // Handle DynamoDB attribute value format
-    if (msg.M) {
-      const role = msg.M.role?.S
-      // Ensure role is either 'user' or 'assistant'
-      if (role !== 'user' && role !== 'assistant') {
-        throw new Error('Invalid role type')
-      }
-      return {
-        content: msg.M.content?.S || '',
-        role,
-        timestamp: msg.M.timestamp?.S || new Date().toISOString()
-      }
-    }
-    // Handle regular object format
-    const role = msg.role
-    if (role !== 'user' && role !== 'assistant') {
-      throw new Error('Invalid role type')
-    }
-    return {
-      content: String(msg.content || ''),
-      role,
-      timestamp: String(msg.timestamp || new Date().toISOString())
-    }
-  } catch (error) {
-    console.error('[DynamoDB] Error parsing message:', error)
-    // Default to user role if parsing fails
-    return {
-      content: '',
-      role: 'user',
-      timestamp: new Date().toISOString()
-    }
-  }
-}
-
-export async function getConversationMetadata(
-  userId: string,
-  { limit = 20, lastEvaluatedKey }: PaginationParams = {}
-): Promise<{
+export interface ConversationList {
   conversations: ConversationMetadata[]
-  lastEvaluatedKey?: Record<string, any>
-}> {
-  console.log('[DynamoDB] Getting conversation metadata for user:', userId)
-  
-  // First, try to get all conversations for the user
-  const command = new QueryCommand({
-    TableName: CONVERSATIONS_TABLE,
-    KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
-    ExpressionAttributeValues: {
-      ':pk': `USER#${userId}`,
-      ':sk': 'CONV#'
-    },
-    // Include all necessary fields
-    ProjectionExpression: 'conversationId, sk, title, updatedAt, createdAt, messageCount, messages',
-    ScanIndexForward: false, // Sort by most recent first
-    ConsistentRead: true // Ensure we get the latest data
-  })
+  totalCount: number
+  hasMore: boolean
+}
 
+export async function getConversationMetadata(userId: string): Promise<ConversationList> {
   try {
+    console.log('[DynamoDB] Getting conversation metadata for user:', userId)
+    const command = new QueryCommand({
+      TableName: CONVERSATIONS_TABLE,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':sk': 'CONV#',
+      },
+      ScanIndexForward: false,
+    })
+
     const result = await docClient.send(command)
-    console.log('[DynamoDB] Raw query result:', JSON.stringify(result.Items, null, 2))
-
-    // Filter and transform items
-    const conversations = (result.Items || [])
-      .filter(item => {
-        const isValid = item && 
-          typeof item === 'object' && 
-          item.sk && 
-          typeof item.sk === 'string' && 
-          item.sk.startsWith('CONV#')
-        if (!isValid) {
-          console.log('[DynamoDB] Filtering out invalid item:', item)
-        }
-        return isValid
-      })
-      .map(item => {
-        // Extract conversationId from sk if not directly available
-        const conversationId = item.conversationId || item.sk.replace('CONV#', '')
-        console.log('[DynamoDB] Processing conversation:', { 
-          sk: item.sk, 
-          conversationId,
-          messageCount: Array.isArray(item.messages) ? item.messages.length : 0
-        })
-
-        return {
-          conversationId,
-          title: item.title || 'Untitled Chat',
-          updatedAt: item.updatedAt || new Date().toISOString(),
-          createdAt: item.createdAt || item.updatedAt || new Date().toISOString(),
-          messageCount: Array.isArray(item.messages) ? item.messages.length : 0
-        }
-      })
-
-    console.log('[DynamoDB] Transformed conversations:', 
-      conversations.map(c => ({ id: c.conversationId, messageCount: c.messageCount }))
-    )
+    const items = result.Items || []
+    
+    const conversations = items.map(item => ({
+      conversationId: item.conversationId,
+      title: item.title,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
+    }))
 
     return {
       conversations,
-      lastEvaluatedKey: result.LastEvaluatedKey
+      totalCount: conversations.length,
+      hasMore: false // Implement pagination if needed
     }
   } catch (error) {
-    console.error('[DynamoDB] Error querying conversations:', error)
+    console.error('[DynamoDB] Error getting conversation metadata:', error)
     throw error
   }
 }
 
 export async function getConversationDetails(userId: string, conversationId: string): Promise<ConversationDetails | null> {
-  if (!conversationId) {
-    console.log('[DynamoDB] Missing conversationId')
-    return null
-  }
-
-  console.log('[DynamoDB] Getting conversation details:', { userId, conversationId })
-  
-  const command = new GetCommand({
-    TableName: CONVERSATIONS_TABLE,
-    Key: {
-      pk: `USER#${userId}`,
-      sk: `CONV#${conversationId}`
-    },
-    ConsistentRead: true // Ensure we get the latest data
-  })
-
   try {
+    console.log('[DynamoDB] Getting conversation details:', { userId, conversationId })
+    const command = new GetCommand({
+      TableName: CONVERSATIONS_TABLE,
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `CONV#${conversationId}`,
+      },
+    })
+
     const result = await docClient.send(command)
-    if (!result.Item) {
-      console.log('[DynamoDB] No conversation found:', { userId, conversationId })
+    const item = result.Item
+
+    if (!item) {
       return null
     }
 
-    // Transform and validate the item
-    const item = result.Item
-    console.log('[DynamoDB] Raw conversation data:', JSON.stringify(item, null, 2))
-
-    // Parse messages with proper error handling
-    let messages: ChatMessage[] = []
-    try {
-      if (Array.isArray(item.messages)) {
-        messages = item.messages.map((msg: any) => {
-          try {
-            return parseMessage(msg)
-          } catch (error) {
-            console.error('[DynamoDB] Error parsing message:', error, msg)
-            return {
-              content: String(msg.content || ''),
-              role: 'user',
-              timestamp: String(msg.timestamp || new Date().toISOString())
-            }
-          }
-        })
-      }
-    } catch (error) {
-      console.error('[DynamoDB] Error processing messages array:', error)
+    return {
+      conversationId: item.conversationId,
+      title: item.title,
+      messages: item.messages,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
     }
-
-    const details: ConversationDetails = {
-      conversationId: item.conversationId || conversationId,
-      title: item.title || 'Untitled Chat',
-      messages,
-      updatedAt: item.updatedAt || new Date().toISOString(),
-      createdAt: item.createdAt || item.updatedAt || new Date().toISOString(),
-      messageCount: messages.length
-    }
-
-    console.log('[DynamoDB] Transformed conversation:', {
-      id: details.conversationId,
-      messageCount: details.messages.length,
-      firstMessage: details.messages[0]?.content.substring(0, 50)
-    })
-
-    return details
   } catch (error) {
     console.error('[DynamoDB] Error getting conversation details:', error)
     throw error
   }
 }
 
-export async function createConversation(params: {
+export async function getConversations(userId: string) {
+  try {
+    console.log('[DynamoDB] Getting conversations for user:', userId)
+    const command = new QueryCommand({
+      TableName: CONVERSATIONS_TABLE,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':sk': 'CONV#',
+      },
+      ScanIndexForward: false,
+    })
+
+    const result = await docClient.send(command)
+    console.log('[DynamoDB] Raw query result:', JSON.stringify(result.Items, null, 2))
+    return (result.Items || []) as ConversationItem[]
+  } catch (error) {
+    console.error('[DynamoDB] Error getting conversations:', error)
+    throw error
+  }
+}
+
+export async function getConversation(userId: string, conversationId: string) {
+  try {
+    console.log('[DynamoDB] Getting conversation:', { userId, conversationId })
+    const command = new GetCommand({
+      TableName: CONVERSATIONS_TABLE,
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `CONV#${conversationId}`,
+      },
+    })
+
+    const result = await docClient.send(command)
+    const item = result.Item
+    return item as ConversationItem | undefined
+  } catch (error) {
+    console.error('[DynamoDB] Error getting conversation:', error)
+    throw error
+  }
+}
+
+export async function createConversation(data: {
   userId: string
   conversationId: string
   title: string
-  messages: ChatMessage[]
-}): Promise<ConversationDetails> {
-  const now = new Date().toISOString()
-  const item = {
-    pk: `USER#${params.userId}`,
-    sk: `CONV#${params.conversationId}`,
-    conversationId: params.conversationId,
-    title: params.title,
-    messages: params.messages.map(msg => ({
-      content: String(msg.content || ''),
-      role: msg.role,
-      timestamp: String(msg.timestamp || now)
-    })),
-    messageCount: params.messages.length,
-    createdAt: now,
-    updatedAt: now
-  }
+  messages: any[]
+}) {
+  try {
+    console.log('[DynamoDB] Creating conversation:', data)
+    const now = new Date().toISOString()
+    
+    const item: ConversationItem = {
+      pk: `USER#${data.userId}`,
+      sk: `CONV#${data.conversationId}`,
+      type: 'CONVERSATION',
+      userId: data.userId,
+      conversationId: data.conversationId,
+      title: data.title,
+      messages: data.messages,
+      createdAt: now,
+      updatedAt: now,
+      sortKey: now
+    }
 
-  await docClient.send(new PutCommand({
-    TableName: CONVERSATIONS_TABLE,
-    Item: item
-  }))
+    await docClient.send(new PutCommand({
+      TableName: CONVERSATIONS_TABLE,
+      Item: item,
+    }))
 
-  return {
-    conversationId: params.conversationId,
-    title: params.title,
-    messages: params.messages,
-    messageCount: params.messages.length,
-    createdAt: now,
-    updatedAt: now
+    console.log('[DynamoDB] Conversation created successfully')
+    return data.conversationId
+  } catch (error) {
+    console.error('[DynamoDB] Error creating conversation:', error)
+    throw error
   }
 }
 
-export async function updateConversation(params: {
+export async function updateConversation(data: {
   userId: string
   conversationId: string
   title?: string
-  messages?: ChatMessage[]
-}): Promise<ConversationDetails | null> {
-  const current = await getConversationDetails(params.userId, params.conversationId)
-  if (!current) return null
+  messages?: any[]
+}) {
+  try {
+    console.log('[DynamoDB] Updating conversation:', data)
+    const now = new Date().toISOString()
+    
+    const item: Partial<ConversationItem> = {
+      ...data,
+      updatedAt: now,
+      sortKey: now
+    }
 
-  const now = new Date().toISOString()
-  const messages = params.messages?.map(msg => ({
-    content: String(msg.content || ''),
-    role: msg.role,
-    timestamp: String(msg.timestamp || now)
-  })) || current.messages
+    await docClient.send(new PutCommand({
+      TableName: CONVERSATIONS_TABLE,
+      Item: {
+        pk: `USER#${data.userId}`,
+        sk: `CONV#${data.conversationId}`,
+        type: 'CONVERSATION',
+        ...item
+      }
+    }))
 
-  const updates = {
-    ...current,
-    title: params.title || current.title,
-    messages,
-    messageCount: messages.length,
-    updatedAt: now
+    console.log('[DynamoDB] Conversation updated successfully')
+    return await getConversation(data.userId, data.conversationId)
+  } catch (error) {
+    console.error('[DynamoDB] Error updating conversation:', error)
+    throw error
   }
-
-  const item = {
-    pk: `USER#${params.userId}`,
-    sk: `CONV#${params.conversationId}`,
-    ...updates
-  }
-
-  await docClient.send(new PutCommand({
-    TableName: CONVERSATIONS_TABLE,
-    Item: item
-  }))
-
-  return updates
 }
 
 export async function deleteConversation(userId: string, conversationId: string): Promise<void> {
-  await docClient.send(new DeleteCommand({
-    TableName: CONVERSATIONS_TABLE,
-    Key: {
-      pk: `USER#${userId}`,
-      sk: `CONV#${conversationId}`
-    }
-  }))
+  try {
+    console.log('[DynamoDB] Deleting conversation:', { userId, conversationId })
+
+    await docClient.send(new DeleteCommand({
+      TableName: CONVERSATIONS_TABLE,
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `CONV#${conversationId}`,
+      },
+    }))
+
+    console.log('[DynamoDB] Conversation deleted successfully')
+  } catch (error) {
+    console.error('[DynamoDB] Error deleting conversation:', error)
+    throw error
+  }
 }
