@@ -25,6 +25,7 @@ export const ReadReceipt = ({ readAt, isAssistant }: ReadReceiptProps) => {
 
   return (
     <div className={chatStyles.readReceipt.container}>
+      <div className="text-xs text-gray-500 mr-1">Read</div>
       <svg 
         className={chatStyles.readReceipt.icon}
         width="12" 

@@ -6,8 +6,8 @@ import { chatStyles } from '../../../utils/styles'
 import { ChatMessageHandler } from '../../../utils/chat-message-handler'
 import { chatService } from '../../../utils/chat-service'
 import TypingIndicator from './TypingIndicator'
-import ReadReceipt from './ReadReceipt'
 import type { ChatMessage, ChatSession } from '../../types/chat'
+import MessageBubble from './MessageBubble'
 
 export default function Chat() {
   // State
@@ -259,25 +259,13 @@ export default function Chat() {
         <div className={chatStyles.main.messagesContainer}>
           <div className={chatStyles.main.messagesArea}>
             {currentSession?.messages.map((msg, index) => (
-              <div
+              <MessageBubble
                 key={`${currentSession.id}-${index}-${msg.timestamp}`}
-                className={`${chatStyles.message.container(msg.role === 'assistant')} group`}
-              >
-                <div className={chatStyles.message.wrapper(msg.role === 'assistant')}>
-                  <div className={chatStyles.message.avatar(msg.role === 'assistant')}>
-                    {msg.role === 'assistant' ? 'A' : getUserInitials()}
-                  </div>
-                  <div className={chatStyles.message.bubble(msg.role === 'assistant')}>
-                    {msg.content}
-                  </div>
-                </div>
-                <div className={chatStyles.message.timestamp}>
-                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-                {msg.role !== 'assistant' && (
-                  <ReadReceipt readAt={msg.readAt} isAssistant={false} />
-                )}
-              </div>
+                content={msg.content}
+                timestamp={msg.timestamp}
+                isAssistant={msg.role === 'assistant'}
+                userInitials={getUserInitials()}
+              />
             ))}
             {isThinking && <TypingIndicator mode="thinking" />}
             {isTyping && <TypingIndicator mode="typing" />}

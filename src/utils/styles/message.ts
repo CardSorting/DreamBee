@@ -8,12 +8,16 @@ export const messageStyles = {
     animate-fadeIn
     py-2
     relative
+    ${isAssistant ? 'mb-2' : 'mb-4'}
+    first:mt-4
+    last:mb-6
   `,
   wrapper: (isAssistant: boolean) => `
-    flex items-end gap-2
+    flex items-end gap-3
     ${isAssistant ? 'flex-row' : 'flex-row-reverse'}
     group
     relative
+    ${isAssistant ? 'ml-2' : 'mr-2'}
   `,
   avatar: (isAssistant: boolean) => `
     w-8 h-8 rounded-full flex-shrink-0
@@ -39,16 +43,6 @@ export const messageStyles = {
     ${isAssistant ? 'bg-white/95' : 'bg-indigo-600/95'}
     transform-gpu translate-y-0
     group-hover:-translate-y-0.5
-    mb-4
-  `,
-  timestamp: `
-    text-[10px] text-gray-400
-    opacity-0 group-hover:opacity-100
-    transition-opacity duration-200
-    select-none
-    font-medium
-    absolute
-    bottom-1
-    left-2
+    leading-relaxed
   `
 }
