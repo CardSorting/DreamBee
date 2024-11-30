@@ -38,6 +38,16 @@ export default function DashboardLayout({
             >
               Auto Dialogue
             </Link>
+            <Link 
+              href="/dashboard/manual-dialogue" 
+              className={`px-3 py-2 rounded-lg transition-colors ${
+                pathname === '/dashboard/manual-dialogue' 
+                  ? 'bg-blue-50 text-blue-600' 
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Manual Dialogue
+            </Link>
           </nav>
         </div>
         <UserButton afterSignOutUrl="/" />
