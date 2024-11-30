@@ -19,9 +19,16 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <ClerkProvider>
-        <body className={inter.className}>
+    <html lang="en" className={inter.className}>
+      <body>
+        <ClerkProvider
+          appearance={{
+            elements: {
+              formButtonPrimary: 'bg-blue-500 hover:bg-blue-600',
+              card: 'bg-white shadow-lg rounded-lg',
+            }
+          }}
+        >
           <div className="min-h-screen flex flex-col">
             <UserDataSync />
             <Header />
@@ -30,8 +37,8 @@ export default function RootLayout({
             </main>
             <Footer />
           </div>
-        </body>
-      </ClerkProvider>
+        </ClerkProvider>
+      </body>
     </html>
   );
 }

@@ -1,14 +1,17 @@
 import { NextResponse, NextRequest } from 'next/server'
 import { getAuth } from '@clerk/nextjs/server'
 import { v4 as uuidv4 } from 'uuid'
-import { 
-  createConversation, 
-  getConversations, 
-  updateConversation, 
-  deleteConversation,
-  getConversation
-} from '@/utils/dynamodb'
-import { redisService } from '@/utils/redis'
+import { createConversation, updateConversation, deleteConversation } from '../../../utils/dynamodb/conversations'
+import { redisService } from '../../../utils/redis'
+import { ChatCacheTransformer } from '../../../utils/chat-cache-transformer'
+import type { ChatMessage, ChatSession } from '../../types/chat'
+
+interface ConversationInput {
+  userId: string;
+  conversationId: string;
+  title: string;
+  messages: ChatMessage[];
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,6 +23,7 @@ export async function POST(request: NextRequest) {
 
     const data = await request.json()
     const conversationId = data.conversationId || uuidv4()
+    const now = new Date().toISOString()
     
     console.log('[Conversations API] Creating conversation:', {
       userId,
@@ -29,25 +33,27 @@ export async function POST(request: NextRequest) {
     })
 
     // Create conversation in DynamoDB
-    await createConversation({
+    const conversationInput: ConversationInput = {
       userId,
       conversationId,
-      status: 'completed',
       title: data.title || 'New Chat',
-      messages: data.messages || [],
-      createdAt: new Date().toISOString()
-    })
+      messages: data.messages || []
+    }
+
+    await createConversation(conversationInput)
 
     // Invalidate cache since we've added a new conversation
     await redisService.invalidateChatConversations(userId)
 
-    return NextResponse.json({ 
+    const response: ChatSession = {
       id: conversationId,
       title: data.title || 'New Chat',
       messages: data.messages || [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    })
+      createdAt: now,
+      updatedAt: now
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error('[Conversations API] Error:', error)
     if (error instanceof Error) {
@@ -68,25 +74,6 @@ export async function GET(request: NextRequest) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    // Check if requesting a single conversation
-    const { searchParams } = new URL(request.url)
-    const conversationId = searchParams.get('id')
-
-    if (conversationId) {
-      const conversation = await getConversation(userId, conversationId)
-      if (!conversation) {
-        return new NextResponse('Conversation not found', { status: 404 })
-      }
-      
-      return NextResponse.json({
-        id: conversation.conversationId,
-        title: conversation.title || 'Untitled Chat',
-        messages: conversation.messages || [],
-        createdAt: conversation.createdAt,
-        updatedAt: conversation.updatedAt
-      })
-    }
-
     // Try to get conversations from cache first
     const cachedConversations = await redisService.getChatConversations(userId)
     if (cachedConversations) {
@@ -96,26 +83,19 @@ export async function GET(request: NextRequest) {
 
     // If not in cache, get from DynamoDB
     console.log('[Conversations API] Getting conversations from DynamoDB for user:', userId)
-    const conversations = await getConversations(userId)
+    const conversations = await redisService.getChatConversations(userId) || []
     
     // Transform conversations to match ChatSession interface
-    const transformedConversations = conversations.map(c => ({
-      id: c.conversationId,
-      title: c.title || 'Untitled Chat',
-      messages: c.messages || [],
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt
+    const transformedConversations: ChatSession[] = conversations.map((conv: any) => ({
+      id: conv.conversationId,
+      title: conv.title || 'Untitled Chat',
+      messages: conv.messages || [],
+      createdAt: conv.updatedAt || new Date().toISOString(),
+      updatedAt: conv.updatedAt || new Date().toISOString()
     }))
 
     // Cache the conversations
     await redisService.cacheChatConversations(userId, transformedConversations)
-
-    console.log('[Conversations API] Retrieved conversations:', transformedConversations.map(c => ({
-      id: c.id,
-      title: c.title,
-      messageCount: c.messages.length,
-      updatedAt: c.updatedAt
-    })))
 
     return NextResponse.json(transformedConversations)
   } catch (error) {
@@ -144,21 +124,6 @@ export async function PUT(request: NextRequest) {
       return new NextResponse('Missing conversation ID', { status: 400 })
     }
 
-    // Get current version of the conversation
-    const currentConversation = await getConversation(userId, data.conversationId)
-    if (!currentConversation) {
-      return new NextResponse('Conversation not found', { status: 404 })
-    }
-
-    // Check version for conflicts
-    if (data.expectedVersion && currentConversation.updatedAt !== data.expectedVersion) {
-      console.error('[Conversations API] Version mismatch:', {
-        expected: data.expectedVersion,
-        actual: currentConversation.updatedAt
-      })
-      return new NextResponse('Conversation was updated elsewhere', { status: 409 })
-    }
-
     console.log('[Conversations API] Updating conversation:', {
       userId,
       conversationId: data.conversationId,
@@ -167,13 +132,14 @@ export async function PUT(request: NextRequest) {
     })
 
     // Update conversation in DynamoDB
-    const updatedConversation = await updateConversation({
+    const conversationInput: ConversationInput = {
       userId,
       conversationId: data.conversationId,
-      status: 'completed',
       title: data.title || 'Untitled Chat',
       messages: data.messages || []
-    })
+    }
+
+    const updatedConversation = await updateConversation(conversationInput)
 
     if (!updatedConversation) {
       console.error('[Conversations API] Failed to update conversation:', {
@@ -186,16 +152,15 @@ export async function PUT(request: NextRequest) {
     // Invalidate cache since we've updated a conversation
     await redisService.invalidateChatConversations(userId)
 
-    // Transform conversation to match ChatSession interface
-    const transformedConversation = {
-      id: updatedConversation.conversationId,
-      title: updatedConversation.title || 'Untitled Chat',
-      messages: updatedConversation.messages || [],
-      createdAt: updatedConversation.createdAt,
-      updatedAt: updatedConversation.updatedAt
+    const response: ChatSession = {
+      id: data.conversationId,
+      title: data.title || 'Untitled Chat',
+      messages: data.messages || [],
+      createdAt: updatedConversation.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }
 
-    return NextResponse.json(transformedConversation)
+    return NextResponse.json(response)
   } catch (error) {
     console.error('[Conversations API] Error:', error)
     if (error instanceof Error) {

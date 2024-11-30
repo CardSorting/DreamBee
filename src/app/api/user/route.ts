@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuth } from '@clerk/nextjs/server'
 import { docClient } from '../../../utils/dynamodb/client'
-import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
+import { PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb'
 
 const USERS_TABLE = process.env.DYNAMODB_USERS_TABLE || 'users'
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId } = getAuth(req)
+    if (!userId) {
+      console.error('[User API] No user ID found')
+      return new NextResponse('Unauthorized', { status: 401 })
+    }
+
     const data = await req.json()
-    const { clerkId } = data
 
     // Check if user already exists
     const getCommand = new GetCommand({
       TableName: USERS_TABLE,
       Key: {
-        pk: `USER#${clerkId}`,
+        pk: `USER#${userId}`,
         sk: 'PROFILE'
       }
     })
@@ -30,11 +36,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Create or update user
-    console.log('[DynamoDB] Creating/updating user:', clerkId)
+    console.log('[DynamoDB] Creating/updating user:', userId)
     const now = new Date().toISOString()
 
     const item = {
-      pk: `USER#${clerkId}`,
+      pk: `USER#${userId}`,
       sk: 'PROFILE',
       type: 'USER',
       ...data,
@@ -53,7 +59,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ message: 'User data synced successfully' })
   } catch (error) {
-    console.error('[DynamoDB] Error syncing user data:', error)
+    console.error('[User API] Error:', error)
+    if (error instanceof Error) {
+      console.error('[User API] Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
+    }
     return NextResponse.json(
       { error: 'Failed to sync user data' },
       { status: 500 }

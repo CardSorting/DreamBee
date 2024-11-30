@@ -3,23 +3,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { v4 as uuidv4 } from 'uuid'
+import type { ChatMessage, ChatSession } from '../../types/chat'
 
 // Cache duration in milliseconds (5 minutes)
 const CACHE_DURATION = 5 * 60 * 1000
-
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: string
-}
-
-interface ChatSession {
-  id: string
-  title: string
-  messages: ChatMessage[]
-  createdAt: string
-  updatedAt: string
-}
 
 interface CacheEntry {
   data: ChatSession[]
@@ -70,7 +57,9 @@ export default function Chat() {
         return
       }
 
-      const response = await fetch('/api/conversations')
+      const response = await fetch('/api/conversations', {
+        credentials: 'include',
+      })
       if (!response.ok) throw new Error('Failed to load sessions')
       const data = await response.json()
       
@@ -197,6 +186,7 @@ export default function Chat() {
       const saveResponse = await fetch('/api/conversations', {
         method: session.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           conversationId: updatedSession.id,
           title: updatedSession.title,
@@ -238,6 +228,7 @@ export default function Chat() {
       const chatResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           messages: sessionWithSavedData.messages,
           stream: false
@@ -270,6 +261,7 @@ export default function Chat() {
       const updateResponse = await fetch('/api/conversations', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           conversationId: finalSession.id,
           title: finalSession.title,
