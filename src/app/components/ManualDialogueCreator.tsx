@@ -246,7 +246,6 @@ export default function ManualDialogueCreator({
     <div className="space-y-8">
       {/* Header with History Button */}
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-semibold text-gray-900">Manual Dialogue Creator</h2>
         {dialogueId && (
           <button
             onClick={() => setIsHistoryOpen(true)}
