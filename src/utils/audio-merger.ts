@@ -2,12 +2,28 @@ export interface AudioSegmentInfo {
   url: string
   startTime: number
   endTime: number
+  character: string
+  previousCharacter?: string
 }
 
 export class AudioMerger {
-  private audioContext!: AudioContext // Using definite assignment assertion
+  private audioContext!: AudioContext
   private buffers: Map<string, AudioBuffer>
   private isInitialized: boolean
+
+  // Simple pause durations (in seconds)
+  private readonly PAUSE_DURATIONS = {
+    SAME_SPEAKER: 0.3,    // Short pause for same speaker
+    SPEAKER_CHANGE: 0.8,  // Longer pause when speaker changes
+    PUNCTUATION: {
+      '.': 0.6,          // Full stop
+      '!': 0.6,          // Exclamation
+      '?': 0.6,          // Question
+      ',': 0.3,          // Comma
+      ';': 0.4,          // Semicolon
+      ':': 0.4           // Colon
+    }
+  }
 
   constructor() {
     this.buffers = new Map()
@@ -34,25 +50,61 @@ export class AudioMerger {
     return audioBuffer
   }
 
+  private calculatePause(text: string, currentCharacter: string, previousCharacter?: string): number {
+    let pause = 0
+
+    // Add pause based on speaker change
+    if (previousCharacter && previousCharacter !== currentCharacter) {
+      pause += this.PAUSE_DURATIONS.SPEAKER_CHANGE
+    } else if (previousCharacter === currentCharacter) {
+      pause += this.PAUSE_DURATIONS.SAME_SPEAKER
+    }
+
+    // Add pause based on ending punctuation
+    const lastChar = text.trim().slice(-1)
+    if (lastChar in this.PAUSE_DURATIONS.PUNCTUATION) {
+      pause += this.PAUSE_DURATIONS.PUNCTUATION[lastChar as keyof typeof this.PAUSE_DURATIONS.PUNCTUATION]
+    }
+
+    return pause
+  }
+
   async mergeAudioSegments(segments: AudioSegmentInfo[]): Promise<Blob> {
     await this.initialize()
 
-    // Calculate total duration
-    const totalDuration = Math.max(...segments.map(s => s.endTime))
-    
+    // Calculate total duration including pauses
+    let currentTime = 0
+    const segmentsWithPauses = segments.map((segment, index) => {
+      const pause = this.calculatePause(
+        '', // We don't have the text here, but we can use speaker changes
+        segment.character,
+        index > 0 ? segments[index - 1].character : undefined
+      )
+      
+      const startTime = currentTime + pause
+      const duration = segment.endTime - segment.startTime
+      currentTime = startTime + duration
+      
+      return {
+        ...segment,
+        adjustedStartTime: startTime,
+        adjustedEndTime: startTime + duration
+      }
+    })
+
     // Create output buffer
     const outputBuffer = this.audioContext.createBuffer(
       2, // stereo
-      Math.ceil(totalDuration * this.audioContext.sampleRate),
+      Math.ceil(currentTime * this.audioContext.sampleRate),
       this.audioContext.sampleRate
     )
 
     // Load and merge all segments
-    await Promise.all(segments.map(async segment => {
+    await Promise.all(segmentsWithPauses.map(async segment => {
       const buffer = await this.fetchAndDecodeAudio(segment.url)
       
       // Calculate start position in samples
-      const startSample = Math.floor(segment.startTime * this.audioContext.sampleRate)
+      const startSample = Math.floor(segment.adjustedStartTime * this.audioContext.sampleRate)
       
       // Copy each channel
       for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
@@ -145,7 +197,6 @@ export class AudioMerger {
     }
 
     let index = 0
-    const volume = 0x7FFF // Maximum value for 16-bit
     for (let i = 0; i < buffer.length; i++) {
       for (let channel = 0; channel < numChannels; channel++) {
         const sample = channelData[channel][i]

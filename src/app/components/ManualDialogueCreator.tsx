@@ -125,7 +125,9 @@ export default function ManualDialogueCreator({
       const segments: AudioSegmentInfo[] = result.audioUrls.map((audio, index) => ({
         url: audio.url,
         startTime: result.transcript.json.segments[index].startTime,
-        endTime: result.transcript.json.segments[index].endTime
+        endTime: result.transcript.json.segments[index].endTime,
+        character: audio.character,
+        previousCharacter: index > 0 ? result.audioUrls[index - 1].character : undefined
       }))
 
       const audioMerger = getAudioMerger()
