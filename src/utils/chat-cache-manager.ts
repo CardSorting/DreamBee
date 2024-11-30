@@ -98,12 +98,14 @@ export class ChatCacheManager {
     
     return await this.withLock(key, async () => {
       try {
-        const data = await this.client.get<string>(key)
+        const data = await this.client.get(key)
         if (!data) {
           return null
         }
 
-        return ChatCacheTransformer.deserialize(data)
+        // Ensure we have a string before deserializing
+        const dataString = typeof data === 'string' ? data : JSON.stringify(data)
+        return ChatCacheTransformer.deserialize(dataString)
       } catch (error) {
         console.error('[ChatCacheManager] Error in getConversations:', error)
         return null
@@ -135,9 +137,10 @@ export class ChatCacheManager {
     await this.withLock(key, async () => {
       try {
         // Get current conversations
-        const data = await this.client.get<string>(key)
-        const currentConversations = data 
-          ? ChatCacheTransformer.deserialize(data)
+        const data = await this.client.get(key)
+        const dataString = typeof data === 'string' ? data : JSON.stringify(data)
+        const currentConversations = dataString 
+          ? ChatCacheTransformer.deserialize(dataString)
           : []
         
         // Apply update function

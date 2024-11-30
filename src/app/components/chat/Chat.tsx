@@ -25,6 +25,7 @@ export default function Chat() {
   const [error, setError] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [hasLoadedInitialSessions, setHasLoadedInitialSessions] = useState(false)
   const loadingRef = useRef(false)
   const { isSignedIn, user } = useUser()
 
@@ -54,6 +55,7 @@ export default function Chat() {
         if (!currentSession && cachedData.data.length > 0) {
           setCurrentSession(cachedData.data[0])
         }
+        setHasLoadedInitialSessions(true)
         return
       }
 
@@ -75,28 +77,39 @@ export default function Chat() {
       if (!currentSession && data.length > 0) {
         setCurrentSession(data[0])
       }
+      setHasLoadedInitialSessions(true)
     } catch (error) {
       console.error('Error loading sessions:', error)
       setError(error instanceof Error ? error.message : 'Failed to load sessions')
+      setHasLoadedInitialSessions(true)
     } finally {
       setIsLoading(false)
       loadingRef.current = false
     }
   }, [isSignedIn, user, currentSession])
 
-  // Load sessions when user is signed in
+  // Load initial sessions when user is signed in
   useEffect(() => {
-    if (isSignedIn) {
+    if (isSignedIn && !hasLoadedInitialSessions) {
       loadSessions()
     }
-  }, [isSignedIn, loadSessions])
+  }, [isSignedIn, hasLoadedInitialSessions, loadSessions])
 
-  // Create initial session if none exists
+  // Create initial session if needed
   useEffect(() => {
-    if (!isLoading && !currentSession && sessions.length === 0) {
-      handleNewSession()
+    const shouldCreateNewSession = 
+      hasLoadedInitialSessions && // Only after initial load attempt
+      !isLoading && // Not currently loading
+      !currentSession && // No session selected
+      sessions.length === 0 && // No sessions exist
+      !loadingRef.current // Not in the process of loading
+
+    if (shouldCreateNewSession) {
+      const newSession = createNewSession()
+      setCurrentSession(newSession)
+      setSessions([newSession])
     }
-  }, [isLoading, currentSession, sessions.length])
+  }, [isLoading, currentSession, sessions.length, hasLoadedInitialSessions])
 
   // Chat operations
   const createNewSession = useCallback((): ChatSession => {
@@ -331,9 +344,9 @@ export default function Chat() {
 
         {/* History List */}
         <div className="overflow-y-auto h-[calc(100%-5rem)]">
-          {sessions.map(session => (
+          {sessions.map((session, index) => (
             <button
-              key={session.id}
+              key={`${session.id}-${index}`}
               onClick={() => handleSelectSession(session)}
               className={`
                 w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-100 transition-colors
@@ -370,9 +383,9 @@ export default function Chat() {
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-4">
-          {currentSession?.messages.map((msg, i) => (
+          {currentSession?.messages.map((msg, index) => (
             <div
-              key={i}
+              key={`${currentSession.id}-${index}-${msg.timestamp}`}
               className={`
                 mb-4 p-4 rounded-lg max-w-2xl mx-auto
                 ${msg.role === 'assistant' ? 'bg-white shadow-sm' : 'bg-blue-50'}

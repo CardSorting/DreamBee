@@ -1,9 +1,8 @@
 import { NextResponse, NextRequest } from 'next/server'
 import { getAuth } from '@clerk/nextjs/server'
 import { v4 as uuidv4 } from 'uuid'
-import { createConversation, updateConversation, deleteConversation } from '../../../utils/dynamodb/conversations'
+import { createConversation, updateConversation, deleteConversation, getConversationMetadata, getConversationDetails } from '../../../utils/dynamodb/conversations'
 import { redisService } from '../../../utils/redis'
-import { ChatCacheTransformer } from '../../../utils/chat-cache-transformer'
 import type { ChatMessage, ChatSession } from '../../types/chat'
 
 interface ConversationInput {
@@ -11,6 +10,12 @@ interface ConversationInput {
   conversationId: string;
   title: string;
   messages: ChatMessage[];
+}
+
+interface RawMessage {
+  content?: string;
+  role?: string;
+  timestamp?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -32,12 +37,19 @@ export async function POST(request: NextRequest) {
       messageCount: data.messages?.length || 0
     })
 
+    // Validate messages have correct role type
+    const messages: ChatMessage[] = (data.messages || []).map((msg: RawMessage) => ({
+      content: String(msg.content || ''),
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      timestamp: String(msg.timestamp || now)
+    }))
+
     // Create conversation in DynamoDB
     const conversationInput: ConversationInput = {
       userId,
       conversationId,
       title: data.title || 'New Chat',
-      messages: data.messages || []
+      messages
     }
 
     await createConversation(conversationInput)
@@ -48,7 +60,7 @@ export async function POST(request: NextRequest) {
     const response: ChatSession = {
       id: conversationId,
       title: data.title || 'New Chat',
-      messages: data.messages || [],
+      messages,
       createdAt: now,
       updatedAt: now
     }
@@ -74,25 +86,61 @@ export async function GET(request: NextRequest) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    // Try to get conversations from cache first
-    const cachedConversations = await redisService.getChatConversations(userId)
-    if (cachedConversations) {
-      console.log('[Conversations API] Using cached conversations for user:', userId)
-      return NextResponse.json(cachedConversations)
-    }
-
-    // If not in cache, get from DynamoDB
+    // Get conversations from DynamoDB
     console.log('[Conversations API] Getting conversations from DynamoDB for user:', userId)
-    const conversations = await redisService.getChatConversations(userId) || []
+    const { conversations: metadata } = await getConversationMetadata(userId)
     
-    // Transform conversations to match ChatSession interface
-    const transformedConversations: ChatSession[] = conversations.map((conv: any) => ({
-      id: conv.conversationId,
-      title: conv.title || 'Untitled Chat',
-      messages: conv.messages || [],
-      createdAt: conv.updatedAt || new Date().toISOString(),
-      updatedAt: conv.updatedAt || new Date().toISOString()
-    }))
+    console.log('[Conversations API] Found metadata for conversations:', 
+      metadata.map(m => ({ id: m.conversationId, title: m.title }))
+    )
+
+    // For each conversation, get its full details including messages
+    const fullConversations = await Promise.all(
+      metadata.map(async meta => {
+        if (!meta.conversationId) {
+          console.log('[Conversations API] Missing conversationId in metadata:', meta)
+          return null
+        }
+
+        console.log('[Conversations API] Getting details for conversation:', meta.conversationId)
+        const details = await getConversationDetails(userId, meta.conversationId)
+        
+        if (!details) {
+          console.log('[Conversations API] No details found for conversation:', meta.conversationId)
+          return null
+        }
+
+        console.log('[Conversations API] Found details for conversation:', {
+          id: meta.conversationId,
+          messageCount: details.messages.length
+        })
+
+        return details
+      })
+    )
+
+    // Filter out any null results and transform to ChatSession format
+    const transformedConversations: ChatSession[] = fullConversations
+      .filter((conv): conv is NonNullable<typeof conv> => conv !== null)
+      .map(conv => ({
+        id: conv.conversationId,
+        title: conv.title || 'Untitled Chat',
+        messages: conv.messages.map(msg => ({
+          content: msg.content,
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          timestamp: msg.timestamp
+        })),
+        createdAt: conv.createdAt || conv.updatedAt || new Date().toISOString(),
+        updatedAt: conv.updatedAt || new Date().toISOString()
+      }))
+
+    console.log('[Conversations API] Transformed conversations:', {
+      count: transformedConversations.length,
+      conversations: transformedConversations.map(c => ({
+        id: c.id,
+        messageCount: c.messages.length
+      }))
+    })
 
     // Cache the conversations
     await redisService.cacheChatConversations(userId, transformedConversations)
@@ -131,12 +179,19 @@ export async function PUT(request: NextRequest) {
       messageCount: data.messages?.length || 0
     })
 
+    // Validate messages have correct role type
+    const messages: ChatMessage[] = (data.messages || []).map((msg: RawMessage) => ({
+      content: String(msg.content || ''),
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      timestamp: String(msg.timestamp || new Date().toISOString())
+    }))
+
     // Update conversation in DynamoDB
     const conversationInput: ConversationInput = {
       userId,
       conversationId: data.conversationId,
       title: data.title || 'Untitled Chat',
-      messages: data.messages || []
+      messages
     }
 
     const updatedConversation = await updateConversation(conversationInput)
@@ -155,7 +210,7 @@ export async function PUT(request: NextRequest) {
     const response: ChatSession = {
       id: data.conversationId,
       title: data.title || 'Untitled Chat',
-      messages: data.messages || [],
+      messages,
       createdAt: updatedConversation.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
