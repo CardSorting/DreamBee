@@ -7,6 +7,7 @@ import {
   UpdateCommand,
   DeleteCommand
 } from '@aws-sdk/lib-dynamodb'
+import { CharacterVoice } from './voice-config'
 
 // Verify environment variables
 if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || !process.env.AWS_REGION) {
@@ -28,6 +29,7 @@ const docClient = DynamoDBDocumentClient.from(client)
 // Table names from environment variables
 const USERS_TABLE = process.env.DYNAMODB_USERS_TABLE || 'users'
 const CONVERSATIONS_TABLE = process.env.DYNAMODB_CONVERSATIONS_TABLE || 'conversations'
+const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE || 'manual-dialogues'
 
 // Types and Interfaces
 interface AudioSegment {
@@ -57,6 +59,30 @@ interface ConversationData {
   messages?: Array<{ role: string; content: string; timestamp: string }>
   audioSegments?: AudioSegment[]
   metadata?: ConversationMetadata
+  createdAt?: string
+  updatedAt?: string
+}
+
+interface DialogueTurn {
+  character: string
+  text: string
+}
+
+interface ManualDialogueData {
+  userId: string
+  dialogueId: string
+  title: string
+  description: string
+  characters: CharacterVoice[]
+  dialogue: DialogueTurn[]
+  status: 'processing' | 'completed' | 'error'
+  audioSegments?: AudioSegment[]
+  metadata?: {
+    totalDuration: number
+    speakers: string[]
+    turnCount: number
+    createdAt: number
+  }
   createdAt?: string
   updatedAt?: string
 }
@@ -112,7 +138,178 @@ export async function getUser(clerkId: string) {
   }
 }
 
-// Conversation operations
+// Manual Dialogue operations
+export async function createManualDialogue(data: ManualDialogueData) {
+  try {
+    console.log('[DynamoDB] Creating manual dialogue for user:', data.userId)
+    const { userId, dialogueId, ...rest } = data
+    const now = new Date().toISOString()
+    
+    const item = {
+      pk: `USER#${userId}`,
+      sk: `MDLG#${dialogueId}`,
+      type: 'MANUAL_DIALOGUE',
+      userId,
+      dialogueId,
+      ...rest,
+      createdAt: data.createdAt || now,
+      updatedAt: now,
+      sortKey: now,
+    }
+
+    console.log('[DynamoDB] Saving manual dialogue item:', JSON.stringify(item, null, 2))
+
+    const command = new PutCommand({
+      TableName: MANUAL_DIALOGUES_TABLE,
+      Item: item,
+    })
+
+    await docClient.send(command)
+    console.log('[DynamoDB] Manual dialogue created successfully')
+    return dialogueId
+  } catch (error) {
+    console.error('[DynamoDB] Error creating manual dialogue:', error)
+    throw error
+  }
+}
+
+export async function updateManualDialogue(data: ManualDialogueData) {
+  try {
+    console.log('[DynamoDB] Updating manual dialogue:', data.dialogueId)
+    const updateExpressions: string[] = []
+    const expressionAttributeNames: Record<string, string> = {}
+    const expressionAttributeValues: Record<string, any> = {}
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (key !== 'userId' && key !== 'dialogueId' && key !== 'updatedAt' && value !== undefined) {
+        updateExpressions.push(`#${key} = :${key}`)
+        expressionAttributeNames[`#${key}`] = key
+        expressionAttributeValues[`:${key}`] = value
+      }
+    })
+
+    const now = new Date().toISOString()
+    updateExpressions.push('#updatedAt = :updatedAt')
+    expressionAttributeNames['#updatedAt'] = 'updatedAt'
+    expressionAttributeValues[':updatedAt'] = now
+
+    updateExpressions.push('#sortKey = :sortKey')
+    expressionAttributeNames['#sortKey'] = 'sortKey'
+    expressionAttributeValues[':sortKey'] = now
+
+    const command = new UpdateCommand({
+      TableName: MANUAL_DIALOGUES_TABLE,
+      Key: {
+        pk: `USER#${data.userId}`,
+        sk: `MDLG#${data.dialogueId}`,
+      },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: 'ALL_NEW',
+    })
+
+    const response = await docClient.send(command)
+    return response.Attributes
+  } catch (error) {
+    console.error('[DynamoDB] Error updating manual dialogue:', error)
+    throw error
+  }
+}
+
+export async function getManualDialogue(userId: string, dialogueId: string) {
+  try {
+    console.log('[DynamoDB] Getting manual dialogue:', {
+      userId,
+      dialogueId
+    })
+
+    const command = new GetCommand({
+      TableName: MANUAL_DIALOGUES_TABLE,
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `MDLG#${dialogueId}`,
+      },
+    })
+
+    const response = await docClient.send(command)
+    if (!response.Item) {
+      console.log('[DynamoDB] Manual dialogue not found')
+      return null
+    }
+
+    console.log('[DynamoDB] Raw manual dialogue item:', JSON.stringify(response.Item, null, 2))
+
+    if (!response.Item.dialogueId && response.Item.sk) {
+      const extractedId = response.Item.sk.replace('MDLG#', '')
+      return { ...response.Item, dialogueId: extractedId }
+    }
+
+    return response.Item
+  } catch (error) {
+    console.error('[DynamoDB] Error getting manual dialogue:', error)
+    throw error
+  }
+}
+
+export async function getManualDialogues(userId: string) {
+  try {
+    console.log('[DynamoDB] Getting manual dialogues for user:', userId)
+    const command = new QueryCommand({
+      TableName: MANUAL_DIALOGUES_TABLE,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk)',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':sk': 'MDLG#',
+      },
+      ScanIndexForward: false,
+    })
+
+    const response = await docClient.send(command)
+    const items = response.Items || []
+
+    console.log('[DynamoDB] Raw manual dialogue items:', JSON.stringify(items, null, 2))
+
+    const transformedItems = items.map(item => {
+      if (!item.dialogueId && item.sk) {
+        const dialogueId = item.sk.replace('MDLG#', '')
+        return { ...item, dialogueId }
+      }
+      return item
+    })
+
+    return transformedItems.sort((a, b) => {
+      const aKey = a.sortKey || a.updatedAt || a.createdAt
+      const bKey = b.sortKey || b.updatedAt || b.createdAt
+      return bKey.localeCompare(aKey)
+    })
+  } catch (error) {
+    console.error('[DynamoDB] Error getting manual dialogues:', error)
+    throw error
+  }
+}
+
+export async function deleteManualDialogue(userId: string, dialogueId: string) {
+  try {
+    console.log('[DynamoDB] Deleting manual dialogue:', dialogueId)
+    const command = new DeleteCommand({
+      TableName: MANUAL_DIALOGUES_TABLE,
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `MDLG#${dialogueId}`,
+      },
+    })
+
+    await docClient.send(command)
+    console.log('[DynamoDB] Manual dialogue deleted successfully')
+    return true
+  } catch (error) {
+    console.error('[DynamoDB] Error deleting manual dialogue:', error)
+    throw error
+  }
+}
+
+// Conversation operations (original code remains unchanged)
 export async function createConversation(data: ConversationData) {
   try {
     console.log('[DynamoDB] Creating conversation for user:', data.userId)
@@ -128,7 +325,7 @@ export async function createConversation(data: ConversationData) {
       ...rest,
       createdAt: data.createdAt || now,
       updatedAt: now,
-      sortKey: now, // Additional field for sorting
+      sortKey: now,
     }
 
     console.log('[DynamoDB] Saving conversation item:', JSON.stringify(item, null, 2))
@@ -154,7 +351,6 @@ export async function updateConversation(data: ConversationData) {
     const expressionAttributeNames: Record<string, string> = {}
     const expressionAttributeValues: Record<string, any> = {}
 
-    // Build update expressions for each field
     Object.entries(data).forEach(([key, value]) => {
       if (key !== 'userId' && key !== 'conversationId' && key !== 'updatedAt' && value !== undefined) {
         updateExpressions.push(`#${key} = :${key}`)
@@ -163,13 +359,11 @@ export async function updateConversation(data: ConversationData) {
       }
     })
 
-    // Add updatedAt timestamp
     const now = new Date().toISOString()
     updateExpressions.push('#updatedAt = :updatedAt')
     expressionAttributeNames['#updatedAt'] = 'updatedAt'
     expressionAttributeValues[':updatedAt'] = now
 
-    // Update sortKey for proper ordering
     updateExpressions.push('#sortKey = :sortKey')
     expressionAttributeNames['#sortKey'] = 'sortKey'
     expressionAttributeValues[':sortKey'] = now
@@ -215,10 +409,8 @@ export async function getConversation(userId: string, conversationId: string) {
       return null
     }
 
-    // Log the raw item for debugging
     console.log('[DynamoDB] Raw conversation item:', JSON.stringify(response.Item, null, 2))
 
-    // Ensure conversationId is present
     if (!response.Item.conversationId && response.Item.sk) {
       const extractedId = response.Item.sk.replace('CONV#', '')
       return { ...response.Item, conversationId: extractedId }
@@ -241,16 +433,14 @@ export async function getConversations(userId: string) {
         ':pk': `USER#${userId}`,
         ':sk': 'CONV#',
       },
-      ScanIndexForward: false, // Sort in descending order (newest first)
+      ScanIndexForward: false,
     })
 
     const response = await docClient.send(command)
     const items = response.Items || []
 
-    // Log the raw items for debugging
     console.log('[DynamoDB] Raw conversation items:', JSON.stringify(items, null, 2))
 
-    // Transform items to ensure conversationId is present and sort by updatedAt
     const transformedItems = items.map(item => {
       if (!item.conversationId && item.sk) {
         const conversationId = item.sk.replace('CONV#', '')
@@ -259,7 +449,6 @@ export async function getConversations(userId: string) {
       return item
     })
 
-    // Sort by sortKey (which is set to the latest updatedAt timestamp)
     return transformedItems.sort((a, b) => {
       const aKey = a.sortKey || a.updatedAt || a.createdAt
       const bKey = b.sortKey || b.updatedAt || b.createdAt
