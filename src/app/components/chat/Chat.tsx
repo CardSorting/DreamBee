@@ -2,11 +2,24 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useUser } from '@clerk/nextjs'
-import { ChatMessage, ChatSession } from '@/app/types/chat'
 import { v4 as uuidv4 } from 'uuid'
 
 // Cache duration in milliseconds (5 minutes)
 const CACHE_DURATION = 5 * 60 * 1000
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+}
+
+interface ChatSession {
+  id: string
+  title: string
+  messages: ChatMessage[]
+  createdAt: string
+  updatedAt: string
+}
 
 interface CacheEntry {
   data: ChatSession[]
@@ -25,7 +38,6 @@ export default function Chat() {
   const [error, setError] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const initializedRef = useRef(false)
   const loadingRef = useRef(false)
   const { isSignedIn, user } = useUser()
 
@@ -92,12 +104,10 @@ export default function Chat() {
 
   // Create initial session if none exists
   useEffect(() => {
-    if (initializedRef.current) return
-    if (!currentSession && sessions.length === 0) {
+    if (!isLoading && !currentSession && sessions.length === 0) {
       handleNewSession()
-      initializedRef.current = true
     }
-  }, [currentSession, sessions])
+  }, [isLoading, currentSession, sessions.length])
 
   // Chat operations
   const createNewSession = useCallback((): ChatSession => {
