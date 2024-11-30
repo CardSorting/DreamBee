@@ -1,78 +1,152 @@
 require('dotenv').config({ path: '.env.local' })
-const { DynamoDBClient, CreateTableCommand } = require('@aws-sdk/client-dynamodb')
+const { DynamoDBClient, CreateTableCommand, DeleteTableCommand, ListTablesCommand, waitUntilTableNotExists } = require('@aws-sdk/client-dynamodb')
 
 // Verify environment variables
-if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || !process.env.AWS_REGION) {
-  console.error('Missing required AWS environment variables. Please check your .env.local file.')
-  console.error('Required variables:')
-  console.error('- AWS_ACCESS_KEY_ID')
-  console.error('- AWS_SECRET_ACCESS_KEY')
-  console.error('- AWS_REGION')
-  process.exit(1)
+const requiredEnvVars = {
+  AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+  AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+  AWS_REGION: process.env.AWS_REGION
 }
 
+Object.entries(requiredEnvVars).forEach(([key, value]) => {
+  if (!value) {
+    console.error(`Missing ${key} environment variable`)
+    process.exit(1)
+  }
+})
+
+// Initialize DynamoDB client with enhanced configuration
 const client = new DynamoDBClient({
   region: process.env.AWS_REGION,
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
+  maxAttempts: 3,
+  retryMode: 'standard',
+  logger: {
+    debug: (...args) => console.debug('[DynamoDB]', ...args),
+    info: (...args) => console.info('[DynamoDB]', ...args),
+    warn: (...args) => console.warn('[DynamoDB]', ...args),
+    error: (...args) => console.error('[DynamoDB]', ...args)
+  }
 })
 
-async function createUsersTable() {
-  const command = new CreateTableCommand({
-    TableName: 'users',
-    AttributeDefinitions: [
-      { AttributeName: 'pk', AttributeType: 'S' },
-      { AttributeName: 'sk', AttributeType: 'S' },
-    ],
-    KeySchema: [
-      { AttributeName: 'pk', KeyType: 'HASH' },
-      { AttributeName: 'sk', KeyType: 'RANGE' },
-    ],
-    BillingMode: 'PAY_PER_REQUEST',
-  })
+const CONVERSATIONS_TABLE = process.env.DYNAMODB_CONVERSATIONS_TABLE || 'conversations'
 
+async function listTables() {
   try {
-    console.log('Creating users table...')
-    console.log('Using AWS Region:', process.env.AWS_REGION)
-    const response = await client.send(command)
-    console.log('Users table created:', response.TableDescription.TableName)
+    const command = new ListTablesCommand({})
+    const { TableNames } = await client.send(command)
+    console.log('Existing tables:', TableNames)
+    return TableNames
   } catch (error) {
-    if (error.name === 'ResourceInUseException') {
-      console.log('Users table already exists')
+    console.error('Error listing tables:', error)
+    throw error
+  }
+}
+
+async function deleteTableIfExists(tableName) {
+  try {
+    const tables = await listTables()
+    
+    if (tables.includes(tableName)) {
+      console.log(`Deleting existing table: ${tableName}`)
+      const deleteCommand = new DeleteTableCommand({ TableName: tableName })
+      await client.send(deleteCommand)
+      await waitUntilTableNotExists(
+        { client, maxWaitTime: 60 },
+        { TableName: tableName }
+      )
+      console.log(`Table ${tableName} deleted successfully`)
     } else {
-      console.error('Error creating users table:', error)
-      throw error
+      console.log(`Table ${tableName} does not exist, skipping deletion`)
     }
+  } catch (error) {
+    console.error(`Error deleting table ${tableName}:`, error)
+    throw error
   }
 }
 
 async function createConversationsTable() {
-  const command = new CreateTableCommand({
-    TableName: 'conversations',
-    AttributeDefinitions: [
-      { AttributeName: 'pk', AttributeType: 'S' },
-      { AttributeName: 'sk', AttributeType: 'S' },
-    ],
-    KeySchema: [
-      { AttributeName: 'pk', KeyType: 'HASH' },
-      { AttributeName: 'sk', KeyType: 'RANGE' },
-    ],
-    BillingMode: 'PAY_PER_REQUEST',
-  })
-
   try {
+    await deleteTableIfExists(CONVERSATIONS_TABLE)
+
     console.log('Creating conversations table...')
+    const command = new CreateTableCommand({
+      TableName: CONVERSATIONS_TABLE,
+      AttributeDefinitions: [
+        { AttributeName: 'pk', AttributeType: 'S' },
+        { AttributeName: 'sk', AttributeType: 'S' },
+        { AttributeName: 'updatedAt', AttributeType: 'S' },
+        { AttributeName: 'conversationId', AttributeType: 'S' }
+      ],
+      KeySchema: [
+        { AttributeName: 'pk', KeyType: 'HASH' },
+        { AttributeName: 'sk', KeyType: 'RANGE' },
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: 'UpdatedAtIndex',
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'updatedAt', KeyType: 'RANGE' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        },
+        {
+          IndexName: 'ConversationIdIndex',
+          KeySchema: [
+            { AttributeName: 'conversationId', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        }
+      ],
+      BillingMode: 'PROVISIONED',
+      ProvisionedThroughput: {
+        ReadCapacityUnits: 5,
+        WriteCapacityUnits: 5
+      },
+      StreamSpecification: {
+        StreamEnabled: true,
+        StreamViewType: 'NEW_AND_OLD_IMAGES'
+      }
+    })
+
     const response = await client.send(command)
     console.log('Conversations table created:', response.TableDescription.TableName)
+    console.log('Table status:', response.TableDescription.TableStatus)
+    console.log('Table ARN:', response.TableDescription.TableArn)
   } catch (error) {
-    if (error.name === 'ResourceInUseException') {
-      console.log('Conversations table already exists')
-    } else {
-      console.error('Error creating conversations table:', error)
-      throw error
+    console.error('Error creating conversations table:', error)
+    throw error
+  }
+}
+
+async function verifyTableExists(tableName) {
+  try {
+    const tables = await listTables()
+    if (!tables.includes(tableName)) {
+      throw new Error(`Table ${tableName} does not exist`)
     }
+    console.log(`Table ${tableName} exists`)
+    return true
+  } catch (error) {
+    console.error(`Error verifying table ${tableName}:`, error)
+    throw error
   }
 }
 
@@ -84,8 +158,15 @@ async function setup() {
     console.log('Secret Access Key:', process.env.AWS_SECRET_ACCESS_KEY ? '****' + process.env.AWS_SECRET_ACCESS_KEY.slice(-4) : 'Not set')
     console.log('Region:', process.env.AWS_REGION || 'Not set')
     
-    await createUsersTable()
+    // List existing tables
+    await listTables()
+
+    // Create conversations table
     await createConversationsTable()
+
+    // Verify table was created
+    await verifyTableExists(CONVERSATIONS_TABLE)
+
     console.log('DynamoDB setup complete')
   } catch (error) {
     console.error('Setup failed:', error)

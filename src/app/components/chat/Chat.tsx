@@ -2,19 +2,12 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useUser } from '@clerk/nextjs'
-import { v4 as uuidv4 } from 'uuid'
+import { chatStyles } from '../../../utils/styles'
+import { ChatMessageHandler } from '../../../utils/chat-message-handler'
+import { chatService } from '../../../utils/chat-service'
+import TypingIndicator from './TypingIndicator'
+import ReadReceipt from './ReadReceipt'
 import type { ChatMessage, ChatSession } from '../../types/chat'
-
-// Cache duration in milliseconds (5 minutes)
-const CACHE_DURATION = 5 * 60 * 1000
-
-interface CacheEntry {
-  data: ChatSession[]
-  timestamp: number
-}
-
-// In-memory cache
-const sessionsCache = new Map<string, CacheEntry>()
 
 export default function Chat() {
   // State
@@ -22,12 +15,149 @@ export default function Chat() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const [hasLoadedInitialSessions, setHasLoadedInitialSessions] = useState(false)
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true)
   const loadingRef = useRef(false)
-  const { isSignedIn, user } = useUser()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messageHandlerRef = useRef<ChatMessageHandler | null>(null)
+  const { isSignedIn, user, isLoaded } = useUser()
+
+  // Initialize message handler
+  useEffect(() => {
+    if (!user) return
+
+    messageHandlerRef.current = new ChatMessageHandler({
+      onThinkingStart: () => setIsThinking(true),
+      onThinkingEnd: () => setIsThinking(false),
+      onTypingStart: () => setIsTyping(true),
+      onTypingEnd: () => setIsTyping(false),
+      onMessageUpdate: (session: ChatSession) => {
+        setCurrentSession(session)
+        setSessions(prev => {
+          const exists = prev.some(s => s.id === session.id)
+          if (exists) {
+            return prev.map(s => s.id === session.id ? session : s)
+          }
+          return [session, ...prev]
+        })
+      },
+      onError: (errorMessage: string) => setError(errorMessage)
+    })
+  }, [user])
+
+  // Load sessions
+  useEffect(() => {
+    async function loadSessions() {
+      if (!user || !isSignedIn) return
+
+      try {
+        setIsLoadingSessions(true)
+        const loadedSessions = await chatService.getAllSessions(user.id)
+        setSessions(loadedSessions)
+        setIsLoadingSessions(false)
+      } catch (err) {
+        console.error('Error loading sessions:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load sessions')
+        setIsLoadingSessions(false)
+      }
+    }
+
+    if (isLoaded && isSignedIn) {
+      loadSessions()
+    }
+  }, [user, isSignedIn, isLoaded])
+
+  // Get user initials for avatar
+  const getUserInitials = () => {
+    if (!user?.firstName && !user?.lastName) {
+      return 'U'
+    }
+    return `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`
+  }
+
+  // Session management
+  const createNewSession = useCallback((): ChatSession => {
+    return {
+      id: crypto.randomUUID(),
+      title: 'New Chat',
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  }, [])
+
+  const handleNewSession = useCallback(async () => {
+    if (!user) return
+
+    try {
+      const newSession = await chatService.createNewSession(user.id, 'New Chat')
+      setCurrentSession(newSession)
+      setSessions(prev => [newSession, ...prev])
+    } catch (err) {
+      console.error('Error creating new session:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create new session')
+    }
+  }, [user])
+
+  const handleSelectSession = useCallback(async (session: ChatSession) => {
+    if (!user) return
+
+    try {
+      const fullSession = await chatService.getSession(user.id, session.id)
+      if (fullSession) {
+        setCurrentSession(fullSession)
+      }
+    } catch (err) {
+      console.error('Error loading session:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load session')
+    }
+  }, [user])
+
+  // Message handling
+  const handleSendMessage = useCallback(async () => {
+    if (!message.trim() || isLoading || !messageHandlerRef.current || !user) return
+
+    try {
+      setIsLoading(true)
+      setError(null)
+      setMessage('')
+
+      const finalSession = await messageHandlerRef.current.processMessage(
+        message,
+        currentSession,
+        createNewSession,
+        user.id
+      )
+
+      if (finalSession) {
+        setCurrentSession(finalSession)
+        setSessions(prev => prev.map(s => s.id === finalSession.id ? finalSession : s))
+      }
+    } catch (err) {
+      console.error('Chat error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to process message')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [message, isLoading, currentSession, createNewSession, user])
+
+  // Scroll to bottom of messages
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      const parent = messagesEndRef.current.parentElement
+      if (parent) {
+        parent.scrollTop = parent.scrollHeight
+      }
+    }
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [currentSession?.messages, isThinking, isTyping])
 
   // Handle responsive behavior
   useEffect(() => {
@@ -37,408 +167,178 @@ export default function Chat() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Load sessions with caching
-  const loadSessions = useCallback(async () => {
-    if (loadingRef.current || !isSignedIn || !user) return
+  if (!isLoaded) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    )
+  }
 
-    try {
-      loadingRef.current = true
-      setIsLoading(true)
-
-      // Check cache first
-      const cachedData = sessionsCache.get(user.id)
-      const now = Date.now()
-
-      if (cachedData && (now - cachedData.timestamp) < CACHE_DURATION) {
-        console.log('Using cached sessions data')
-        setSessions(cachedData.data)
-        if (!currentSession && cachedData.data.length > 0) {
-          setCurrentSession(cachedData.data[0])
-        }
-        setHasLoadedInitialSessions(true)
-        return
-      }
-
-      const response = await fetch('/api/conversations', {
-        credentials: 'include',
-      })
-      if (!response.ok) throw new Error('Failed to load sessions')
-      const data = await response.json()
-      
-      // Update cache
-      sessionsCache.set(user.id, {
-        data,
-        timestamp: now
-      })
-
-      setSessions(data)
-      
-      // Select the most recent session if none is selected
-      if (!currentSession && data.length > 0) {
-        setCurrentSession(data[0])
-      }
-      setHasLoadedInitialSessions(true)
-    } catch (error) {
-      console.error('Error loading sessions:', error)
-      setError(error instanceof Error ? error.message : 'Failed to load sessions')
-      setHasLoadedInitialSessions(true)
-    } finally {
-      setIsLoading(false)
-      loadingRef.current = false
-    }
-  }, [isSignedIn, user, currentSession])
-
-  // Load initial sessions when user is signed in
-  useEffect(() => {
-    if (isSignedIn && !hasLoadedInitialSessions) {
-      loadSessions()
-    }
-  }, [isSignedIn, hasLoadedInitialSessions, loadSessions])
-
-  // Create initial session if needed
-  useEffect(() => {
-    const shouldCreateNewSession = 
-      hasLoadedInitialSessions && // Only after initial load attempt
-      !isLoading && // Not currently loading
-      !currentSession && // No session selected
-      sessions.length === 0 && // No sessions exist
-      !loadingRef.current // Not in the process of loading
-
-    if (shouldCreateNewSession) {
-      const newSession = createNewSession()
-      setCurrentSession(newSession)
-      setSessions([newSession])
-    }
-  }, [isLoading, currentSession, sessions.length, hasLoadedInitialSessions])
-
-  // Chat operations
-  const createNewSession = useCallback((): ChatSession => {
-    return {
-      id: uuidv4(),
-      title: 'New Chat',
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-  }, [])
-
-  const handleNewSession = useCallback(() => {
-    const newSession = createNewSession()
-    setCurrentSession(newSession)
-    setSessions(prev => [newSession, ...prev])
-    setIsSidebarOpen(false)
-
-    // Optimistically update cache
-    if (user) {
-      const cachedData = sessionsCache.get(user.id)
-      if (cachedData) {
-        sessionsCache.set(user.id, {
-          data: [newSession, ...cachedData.data],
-          timestamp: cachedData.timestamp
-        })
-      }
-    }
-  }, [createNewSession, user])
-
-  const handleSelectSession = useCallback((session: ChatSession) => {
-    setCurrentSession(session)
-    setIsSidebarOpen(false)
-  }, [])
-
-  const updateSessionInCache = useCallback((updatedSession: ChatSession) => {
-    if (!user) return
-
-    const cachedData = sessionsCache.get(user.id)
-    if (cachedData) {
-      const updatedData = cachedData.data.map(s => 
-        s.id === updatedSession.id ? updatedSession : s
-      )
-      sessionsCache.set(user.id, {
-        data: updatedData,
-        timestamp: cachedData.timestamp
-      })
-    }
-  }, [user])
-
-  const handleSendMessage = useCallback(async () => {
-    if (!message.trim() || isLoading) return
-
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      // Create new session if none exists
-      const session = currentSession || createNewSession()
-      
-      // Add user message
-      const userMessage: ChatMessage = {
-        role: 'user',
-        content: message.trim(),
-        timestamp: new Date().toISOString()
-      }
-
-      const updatedSession: ChatSession = {
-        ...session,
-        messages: [...session.messages, userMessage],
-        updatedAt: new Date().toISOString()
-      }
-
-      // Optimistically update UI and cache
-      setCurrentSession(updatedSession)
-      setSessions(prev => {
-        const exists = prev.some(s => s.id === updatedSession.id)
-        if (exists) {
-          return prev.map(s => s.id === updatedSession.id ? updatedSession : s)
-        }
-        return [updatedSession, ...prev]
-      })
-      updateSessionInCache(updatedSession)
-      setMessage('')
-
-      // Save to database with conditional write
-      const saveResponse = await fetch('/api/conversations', {
-        method: session.id ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          conversationId: updatedSession.id,
-          title: updatedSession.title,
-          messages: updatedSession.messages,
-          expectedVersion: session.updatedAt // For conditional write
-        }),
-      })
-
-      if (!saveResponse.ok) {
-        if (saveResponse.status === 409) {
-          // Handle conflict by reloading the session
-          await loadSessions()
-          throw new Error('Session was updated elsewhere. Please try again.')
-        }
-        throw new Error('Failed to save conversation')
-      }
-
-      const savedData = await saveResponse.json()
-      
-      // Update session with saved data
-      const sessionWithSavedData = {
-        ...updatedSession,
-        id: savedData.id,
-        createdAt: savedData.createdAt,
-        updatedAt: savedData.updatedAt
-      }
-      
-      setCurrentSession(sessionWithSavedData)
-      setSessions(prev => {
-        const exists = prev.some(s => s.id === sessionWithSavedData.id)
-        if (exists) {
-          return prev.map(s => s.id === sessionWithSavedData.id ? sessionWithSavedData : s)
-        }
-        return [sessionWithSavedData, ...prev]
-      })
-      updateSessionInCache(sessionWithSavedData)
-
-      // Get AI response
-      const chatResponse = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          messages: sessionWithSavedData.messages,
-          stream: false
-        })
-      })
-
-      if (!chatResponse.ok) {
-        throw new Error('Failed to get AI response')
-      }
-
-      const data = await chatResponse.json()
-      if (!data.content) {
-        throw new Error('Invalid response format')
-      }
-
-      // Add AI response
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: data.content,
-        timestamp: new Date().toISOString()
-      }
-
-      const finalSession: ChatSession = {
-        ...sessionWithSavedData,
-        messages: [...sessionWithSavedData.messages, assistantMessage],
-        updatedAt: new Date().toISOString()
-      }
-
-      // Save final state with conditional write
-      const updateResponse = await fetch('/api/conversations', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          conversationId: finalSession.id,
-          title: finalSession.title,
-          messages: finalSession.messages,
-          expectedVersion: sessionWithSavedData.updatedAt
-        }),
-      })
-
-      if (!updateResponse.ok) {
-        if (updateResponse.status === 409) {
-          // Handle conflict by reloading the session
-          await loadSessions()
-          throw new Error('Session was updated elsewhere. Please try again.')
-        }
-        throw new Error('Failed to update conversation')
-      }
-
-      const updatedData = await updateResponse.json()
-
-      // Update UI and cache with final state
-      const finalSessionWithData = {
-        ...finalSession,
-        updatedAt: updatedData.updatedAt
-      }
-
-      setCurrentSession(finalSessionWithData)
-      setSessions(prev => prev.map(s => s.id === finalSessionWithData.id ? finalSessionWithData : s))
-      updateSessionInCache(finalSessionWithData)
-
-    } catch (err) {
-      console.error('Chat error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to process message')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [message, isLoading, currentSession, createNewSession, loadSessions, updateSessionInCache])
+  if (!isSignedIn) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-gray-500">Please sign in to use the chat.</div>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] relative bg-gray-50">
-      {/* Overlay */}
-      {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-20 transition-opacity"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
+    <div className={chatStyles.container}>
       {/* Sidebar */}
-      <div
-        className={`
-          ${isMobile ? 'fixed inset-x-0 bottom-0 z-30 max-h-[85vh]' : 'hidden lg:block relative w-[280px]'}
-          ${isSidebarOpen ? 'translate-y-0' : isMobile ? 'translate-y-full' : '-translate-x-full lg:translate-x-0'}
-          transform transition-all duration-300 ease-in-out
-          ${isMobile ? 'rounded-t-2xl shadow-2xl' : ''}
-          bg-white h-full overflow-hidden
-        `}
-      >
-        {/* History Header */}
-        <div className="p-4 border-b">
+      <aside className={`
+        ${chatStyles.sidebar.base}
+        ${isMobile ? chatStyles.sidebar.mobile : ''}
+        ${chatStyles.sidebar.transition}
+        ${isSidebarOpen ? chatStyles.sidebar.states.open : chatStyles.sidebar.states.closed}
+      `}>
+        {/* Sidebar Header */}
+        <div className={chatStyles.sidebar.header}>
           <button
-            onClick={handleNewSession}
-            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={() => {
+              handleNewSession()
+              setIsSidebarOpen(false)
+            }}
+            className={chatStyles.sidebar.newChatButton}
+            disabled={isLoadingSessions}
           >
             New Chat
           </button>
         </div>
 
         {/* History List */}
-        <div className="overflow-y-auto h-[calc(100%-5rem)]">
-          {sessions.map((session, index) => (
+        <div className={chatStyles.sidebar.list}>
+          {isLoadingSessions ? (
+            <div className="text-center py-4 text-gray-500">Loading sessions...</div>
+          ) : sessions.map((session, index) => (
             <button
               key={`${session.id}-${index}`}
-              onClick={() => handleSelectSession(session)}
+              onClick={() => {
+                handleSelectSession(session)
+                setIsSidebarOpen(false)
+              }}
               className={`
-                w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-100 transition-colors
-                ${currentSession?.id === session.id ? 'bg-blue-50 hover:bg-blue-100' : ''}
+                ${chatStyles.sidebar.item.base}
+                ${currentSession?.id === session.id ? chatStyles.sidebar.item.active : ''}
               `}
             >
               <div className="flex-1 text-left truncate">
-                {session.title}
+                <div className={chatStyles.sidebar.item.title}>
+                  {session.title}
+                </div>
+                <div className={chatStyles.sidebar.item.date}>
+                  {new Date(session.updatedAt).toLocaleDateString()}
+                </div>
               </div>
-              <div className="text-sm text-gray-500">
+              <div className={chatStyles.sidebar.item.count}>
                 {session.messages.length}
               </div>
             </button>
           ))}
         </div>
-      </div>
+      </aside>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <main className={chatStyles.main.container}>
         {/* Mobile Header */}
         {isMobile && (
-          <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between">
+          <div className={chatStyles.main.mobileHeader}>
             <button
               onClick={() => setIsSidebarOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg"
+              className={chatStyles.main.historyButton}
             >
-              <span className="font-medium">History</span>
+              History
             </button>
-            <div className="text-sm text-gray-500">
+            <div className={chatStyles.main.messageCount}>
               {currentSession?.messages.length || 0} messages
             </div>
           </div>
         )}
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {currentSession?.messages.map((msg, index) => (
-            <div
-              key={`${currentSession.id}-${index}-${msg.timestamp}`}
-              className={`
-                mb-4 p-4 rounded-lg max-w-2xl mx-auto
-                ${msg.role === 'assistant' ? 'bg-white shadow-sm' : 'bg-blue-50'}
-              `}
-            >
-              {msg.content}
-            </div>
-          ))}
+        <div className={chatStyles.main.messagesContainer}>
+          <div className={chatStyles.main.messagesArea}>
+            {currentSession?.messages.map((msg, index) => (
+              <div
+                key={`${currentSession.id}-${index}-${msg.timestamp}`}
+                className={`${chatStyles.message.container(msg.role === 'assistant')} group`}
+              >
+                <div className={chatStyles.message.wrapper(msg.role === 'assistant')}>
+                  <div className={chatStyles.message.avatar(msg.role === 'assistant')}>
+                    {msg.role === 'assistant' ? 'A' : getUserInitials()}
+                  </div>
+                  <div className={chatStyles.message.bubble(msg.role === 'assistant')}>
+                    {msg.content}
+                  </div>
+                </div>
+                <div className={chatStyles.message.timestamp}>
+                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+                {msg.role !== 'assistant' && (
+                  <ReadReceipt readAt={msg.readAt} isAssistant={false} />
+                )}
+              </div>
+            ))}
+            {isThinking && <TypingIndicator mode="thinking" />}
+            {isTyping && <TypingIndicator mode="typing" />}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Error Message */}
         {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 p-4 mx-4 mb-4">
-            <div className="flex">
-              <div className="ml-3">
-                <p className="text-sm text-red-700">{error}</p>
-                <button 
-                  onClick={() => setError(null)}
-                  className="text-sm text-red-600 hover:text-red-800 font-medium mt-1"
-                >
-                  Dismiss
-                </button>
+          <div className={chatStyles.error.container}>
+            <div className={chatStyles.error.content}>
+              <div className="flex">
+                <div className="ml-3">
+                  <p className={chatStyles.error.text}>{error}</p>
+                  <button 
+                    onClick={() => setError(null)}
+                    className={chatStyles.error.dismissButton}
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {/* Input Area */}
-        <div className="border-t bg-white p-4">
-          <div className="max-w-3xl mx-auto flex gap-4">
+        <div className={chatStyles.input.container}>
+          <div className={chatStyles.input.wrapper}>
             <input
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Type a message..."
-              className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isLoading}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+              placeholder={isThinking ? 'Assistant is thinking...' : isTyping ? 'Assistant is typing...' : 'Type a message...'}
+              className={chatStyles.input.field}
+              disabled={isLoading || isThinking || isTyping}
             />
             <button
               onClick={handleSendMessage}
-              disabled={isLoading || !message.trim()}
+              disabled={isLoading || isThinking || isTyping || !message.trim()}
               className={`
-                px-4 py-2 rounded-lg font-medium
-                ${isLoading ? 'bg-gray-100 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'}
-                transition-colors
+                ${chatStyles.input.button.base}
+                ${isLoading || isThinking || isTyping || !message.trim() 
+                  ? chatStyles.input.button.disabled 
+                  : chatStyles.input.button.enabled}
               `}
             >
               {isLoading ? 'Sending...' : 'Send'}
             </button>
           </div>
         </div>
-      </div>
+      </main>
+
+      {/* Mobile Overlay */}
+      {isMobile && isSidebarOpen && (
+        <div
+          className={chatStyles.overlay}
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
     </div>
   )
 }

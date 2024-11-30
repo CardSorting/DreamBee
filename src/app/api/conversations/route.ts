@@ -1,7 +1,8 @@
 import { NextResponse, NextRequest } from 'next/server'
-import { getAuth } from '@clerk/nextjs/server'
+import { auth } from '@clerk/nextjs/server'
 import { v4 as uuidv4 } from 'uuid'
 import { createConversation, updateConversation, deleteConversation, getConversationMetadata, getConversationDetails } from '../../../utils/dynamodb/conversations'
+import type { ConversationDetails } from '../../../utils/dynamodb/conversations'
 import { redisService } from '../../../utils/redis'
 import type { ChatMessage, ChatSession } from '../../types/chat'
 
@@ -18,72 +19,29 @@ interface RawMessage {
   timestamp?: string;
 }
 
-export async function POST(request: NextRequest) {
+async function getUserId(request: NextRequest): Promise<string | null> {
   try {
-    const { userId } = getAuth(request)
-    if (!userId) {
-      console.error('[Conversations API] No user ID found')
-      return new NextResponse('Unauthorized', { status: 401 })
-    }
-
-    const data = await request.json()
-    const conversationId = data.conversationId || uuidv4()
-    const now = new Date().toISOString()
-    
-    console.log('[Conversations API] Creating conversation:', {
-      userId,
-      conversationId,
-      title: data.title,
-      messageCount: data.messages?.length || 0
-    })
-
-    // Validate messages have correct role type
-    const messages: ChatMessage[] = (data.messages || []).map((msg: RawMessage) => ({
-      content: String(msg.content || ''),
-      role: msg.role === 'assistant' ? 'assistant' : 'user',
-      timestamp: String(msg.timestamp || now)
-    }))
-
-    // Create conversation in DynamoDB
-    const conversationInput: ConversationInput = {
-      userId,
-      conversationId,
-      title: data.title || 'New Chat',
-      messages
-    }
-
-    await createConversation(conversationInput)
-
-    // Invalidate cache since we've added a new conversation
-    await redisService.invalidateChatConversations(userId)
-
-    const response: ChatSession = {
-      id: conversationId,
-      title: data.title || 'New Chat',
-      messages,
-      createdAt: now,
-      updatedAt: now
-    }
-
-    return NextResponse.json(response)
+    const authData = await auth()
+    return authData?.userId || null
   } catch (error) {
-    console.error('[Conversations API] Error:', error)
-    if (error instanceof Error) {
-      console.error('[Conversations API] Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
-    }
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[Auth] Error getting user ID:', error)
+    return null
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const { userId } = getAuth(request)
+    const userId = await getUserId(request)
     if (!userId) {
-      console.error('[Conversations API] No user ID found')
+      console.error('[Conversations API] No user found')
       return new NextResponse('Unauthorized', { status: 401 })
+    }
+
+    // Try to get conversations from cache first
+    const cachedConversations = await redisService.getChatConversations(userId)
+    if (cachedConversations) {
+      console.log('[Conversations API] Returning cached conversations for user:', userId)
+      return NextResponse.json(cachedConversations)
     }
 
     // Get conversations from DynamoDB
@@ -103,19 +61,23 @@ export async function GET(request: NextRequest) {
         }
 
         console.log('[Conversations API] Getting details for conversation:', meta.conversationId)
-        const details = await getConversationDetails(userId, meta.conversationId)
-        
-        if (!details) {
-          console.log('[Conversations API] No details found for conversation:', meta.conversationId)
+        try {
+          const details = await getConversationDetails(userId, meta.conversationId)
+          if (!details) {
+            console.log('[Conversations API] No details found for conversation:', meta.conversationId)
+            return null
+          }
+
+          console.log('[Conversations API] Found details for conversation:', {
+            id: meta.conversationId,
+            messageCount: details.messages.length
+          })
+
+          return details
+        } catch (error) {
+          console.error(`[Conversations API] Error getting details for conversation ${meta.conversationId}:`, error)
           return null
         }
-
-        console.log('[Conversations API] Found details for conversation:', {
-          id: meta.conversationId,
-          messageCount: details.messages.length
-        })
-
-        return details
       })
     )
 
@@ -158,11 +120,77 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function POST(request: NextRequest) {
+  try {
+    const userId = await getUserId(request)
+    if (!userId) {
+      console.error('[Conversations API] No user found')
+      return new NextResponse('Unauthorized', { status: 401 })
+    }
+
+    const data = await request.json()
+    const conversationId = data.conversationId || uuidv4()
+    const now = new Date().toISOString()
+    
+    console.log('[Conversations API] Creating conversation:', {
+      userId,
+      conversationId,
+      title: data.title,
+      messageCount: data.messages?.length || 0
+    })
+
+    // Validate messages have correct role type
+    const messages: ChatMessage[] = (data.messages || []).map((msg: RawMessage) => ({
+      content: String(msg.content || ''),
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      timestamp: String(msg.timestamp || now)
+    }))
+
+    // Create conversation in DynamoDB
+    const conversationInput: ConversationInput = {
+      userId,
+      conversationId,
+      title: data.title || 'New Chat',
+      messages
+    }
+
+    try {
+      await createConversation(conversationInput)
+      console.log('[Conversations API] Successfully created conversation:', conversationId)
+    } catch (error) {
+      console.error('[Conversations API] Failed to create conversation:', error)
+      return new NextResponse('Failed to create conversation', { status: 500 })
+    }
+
+    // Invalidate cache since we've added a new conversation
+    await redisService.invalidateChatConversations(userId)
+
+    const response: ChatSession = {
+      id: conversationId,
+      title: data.title || 'New Chat',
+      messages,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    return NextResponse.json(response)
+  } catch (error) {
+    console.error('[Conversations API] Error:', error)
+    if (error instanceof Error) {
+      console.error('[Conversations API] Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
+    }
+    return new NextResponse('Internal Server Error', { status: 500 })
+  }
+}
+
 export async function PUT(request: NextRequest) {
   try {
-    const { userId } = getAuth(request)
+    const userId = await getUserId(request)
     if (!userId) {
-      console.error('[Conversations API] No user ID found')
+      console.error('[Conversations API] No user found')
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
@@ -186,22 +214,48 @@ export async function PUT(request: NextRequest) {
       timestamp: String(msg.timestamp || new Date().toISOString())
     }))
 
-    // Update conversation in DynamoDB
-    const conversationInput: ConversationInput = {
-      userId,
-      conversationId: data.conversationId,
-      title: data.title || 'Untitled Chat',
-      messages
+    // Try to get existing conversation
+    const existingConversation = await getConversationDetails(userId, data.conversationId)
+
+    let updatedConversation: ConversationDetails | null
+
+    if (!existingConversation) {
+      // Create new conversation if it doesn't exist
+      console.log('[Conversations API] Creating new conversation:', data.conversationId)
+      const conversationInput: ConversationInput = {
+        userId,
+        conversationId: data.conversationId,
+        title: data.title || 'New Chat',
+        messages
+      }
+
+      try {
+        updatedConversation = await createConversation(conversationInput)
+      } catch (error) {
+        console.error('[Conversations API] Failed to create conversation:', error)
+        return new NextResponse('Failed to create conversation', { status: 500 })
+      }
+    } else {
+      // Update existing conversation
+      try {
+        updatedConversation = await updateConversation({
+          userId,
+          conversationId: data.conversationId,
+          title: data.title,
+          messages
+        })
+      } catch (error) {
+        console.error('[Conversations API] Failed to update conversation:', error)
+        return new NextResponse('Failed to update conversation', { status: 500 })
+      }
     }
 
-    const updatedConversation = await updateConversation(conversationInput)
-
     if (!updatedConversation) {
-      console.error('[Conversations API] Failed to update conversation:', {
+      console.error('[Conversations API] Failed to update/create conversation:', {
         userId,
         conversationId: data.conversationId
       })
-      return new NextResponse('Failed to update conversation', { status: 404 })
+      return new NextResponse('Failed to update/create conversation', { status: 500 })
     }
 
     // Invalidate cache since we've updated a conversation
@@ -209,10 +263,10 @@ export async function PUT(request: NextRequest) {
 
     const response: ChatSession = {
       id: data.conversationId,
-      title: data.title || 'Untitled Chat',
-      messages,
-      createdAt: updatedConversation.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      title: updatedConversation.title,
+      messages: updatedConversation.messages,
+      createdAt: updatedConversation.createdAt,
+      updatedAt: updatedConversation.updatedAt
     }
 
     return NextResponse.json(response)
@@ -230,9 +284,9 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { userId } = getAuth(request)
+    const userId = await getUserId(request)
     if (!userId) {
-      console.error('[Conversations API] No user ID found')
+      console.error('[Conversations API] No user found')
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
@@ -249,13 +303,29 @@ export async function DELETE(request: NextRequest) {
       conversationId
     })
 
-    // Delete conversation from DynamoDB
-    await deleteConversation(userId, conversationId)
+    // First verify the conversation exists
+    const existingConversation = await getConversationDetails(userId, conversationId)
+    if (!existingConversation) {
+      console.error('[Conversations API] Conversation not found:', {
+        userId,
+        conversationId
+      })
+      return new NextResponse('Conversation not found', { status: 404 })
+    }
 
-    // Invalidate cache since we've deleted a conversation
-    await redisService.invalidateChatConversations(userId)
+    try {
+      // Delete conversation from DynamoDB
+      await deleteConversation(userId, conversationId)
+      console.log('[Conversations API] Successfully deleted conversation:', conversationId)
 
-    return new NextResponse(null, { status: 204 })
+      // Invalidate cache since we've deleted a conversation
+      await redisService.invalidateChatConversations(userId)
+
+      return new NextResponse(null, { status: 204 })
+    } catch (error) {
+      console.error('[Conversations API] Error deleting conversation:', error)
+      return new NextResponse('Failed to delete conversation', { status: 500 })
+    }
   } catch (error) {
     console.error('[Conversations API] Error:', error)
     if (error instanceof Error) {

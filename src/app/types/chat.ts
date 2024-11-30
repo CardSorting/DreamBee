@@ -2,6 +2,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
+  readAt?: string
 }
 
 export interface ChatSession {

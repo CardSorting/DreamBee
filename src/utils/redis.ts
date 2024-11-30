@@ -75,11 +75,12 @@ class RedisService {
           retry: REDIS_CONFIG.retry
         })
         this.cacheManager = ChatCacheManager.getInstance(this.client)
+        console.log('[Redis] Successfully initialized Redis client')
       } catch (error) {
-        console.warn('Failed to initialize Redis client, using fallback storage:', error)
+        console.warn('[Redis] Failed to initialize Redis client, using fallback storage:', error)
       }
     } else {
-      console.warn('Redis configuration missing, using fallback storage')
+      console.warn('[Redis] Redis configuration missing, using fallback storage')
     }
 
     this.initialized = true
@@ -156,14 +157,18 @@ class RedisService {
     response: DialogueSessionsResponse
   ): Promise<void> {
     const key = `dialogue:${userId}:${dialogueId}:sessions:${page}`
-    const value = JSON.stringify(response)
-    this.fallbackStorage.set(key, value)
-
-    if (!this.client) return
-
+    
     try {
-      await this.client.set(key, value, { ex: 300 }) // 5 minutes
-      console.log('[Redis] Cached dialogue sessions for user:', userId, 'dialogue:', dialogueId, 'page:', page)
+      const value = JSON.stringify(response)
+      
+      // Store in fallback storage
+      this.fallbackStorage.set(key, value)
+
+      // Store in Redis if available
+      if (this.client) {
+        await this.client.set(key, value, { ex: 300 }) // 5 minutes
+        console.log('[Redis] Cached dialogue sessions for user:', userId, 'dialogue:', dialogueId, 'page:', page)
+      }
     } catch (error) {
       console.error('[Redis] Error caching dialogue sessions:', error)
     }
@@ -176,25 +181,27 @@ class RedisService {
   ): Promise<DialogueSessionsResponse | null> {
     const key = `dialogue:${userId}:${dialogueId}:sessions:${page}`
 
-    if (!this.client) {
-      const fallbackData = this.fallbackStorage.get(key)
-      return fallbackData ? JSON.parse(fallbackData) : null
-    }
-
     try {
-      const data = await this.client.get<string>(key)
-
-      if (!data) {
-        const fallbackData = this.fallbackStorage.get(key)
-        return fallbackData ? JSON.parse(fallbackData) : null
+      // Try Redis first if available
+      if (this.client) {
+        const redisData = await this.client.get(key)
+        if (redisData) {
+          console.log('[Redis] Cache hit for dialogue sessions:', userId, 'dialogue:', dialogueId, 'page:', page)
+          return typeof redisData === 'string' ? JSON.parse(redisData) : redisData
+        }
       }
 
-      console.log('[Redis] Cache hit for dialogue sessions:', userId, 'dialogue:', dialogueId, 'page:', page)
-      return JSON.parse(data)
+      // Try fallback storage
+      const fallbackData = this.fallbackStorage.get(key)
+      if (fallbackData) {
+        console.log('[Redis] Fallback cache hit for dialogue sessions:', userId, 'dialogue:', dialogueId, 'page:', page)
+        return JSON.parse(fallbackData)
+      }
+
+      return null
     } catch (error) {
       console.error('[Redis] Error fetching dialogue sessions:', error)
-      const fallbackData = this.fallbackStorage.get(key)
-      return fallbackData ? JSON.parse(fallbackData) : null
+      return null
     }
   }
 
