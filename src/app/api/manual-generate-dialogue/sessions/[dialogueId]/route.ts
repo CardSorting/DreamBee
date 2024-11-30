@@ -33,8 +33,7 @@ export async function GET(
       pageSize
     )
 
-    // Cache the response
-    await redisService.cacheDialogueSessions(userId, params.dialogueId, page, {
+    const formattedResponse = {
       sessions: response.sessions,
       pagination: {
         currentPage: page,
@@ -43,18 +42,17 @@ export async function GET(
         totalPages: Math.ceil(response.totalCount / pageSize),
         hasMore: response.hasMore
       }
-    })
+    }
 
-    return NextResponse.json({
-      sessions: response.sessions,
-      pagination: {
-        currentPage: page,
-        pageSize,
-        totalCount: response.totalCount,
-        totalPages: Math.ceil(response.totalCount / pageSize),
-        hasMore: response.hasMore
-      }
-    })
+    // Cache the response
+    await redisService.cacheDialogueSessions(
+      userId,
+      params.dialogueId,
+      page,
+      formattedResponse
+    )
+
+    return NextResponse.json(formattedResponse)
   } catch (error) {
     console.error('[Manual Dialogue Sessions API] Error:', error)
     return new NextResponse('Internal Server Error', { status: 500 })

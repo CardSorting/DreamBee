@@ -255,7 +255,11 @@ class RedisService {
     try {
       if (this.client) {
         const key = `dialogue:${userId}:${dialogueId}:sessions:${page}`
-        await this.client.set(key, JSON.stringify(response), {
+        const serializedData = JSON.stringify({
+          sessions: response.sessions,
+          pagination: response.pagination
+        })
+        await this.client.set(key, serializedData, {
           ex: 300 // 5 minutes expiration
         })
         console.log('[Redis] Cached dialogue sessions for user:', userId, 'dialogue:', dialogueId, 'page:', page)
@@ -276,7 +280,11 @@ class RedisService {
         const data = await this.client.get<string>(key)
         if (data) {
           console.log('[Redis] Cache hit for dialogue sessions:', userId, 'dialogue:', dialogueId, 'page:', page)
-          return JSON.parse(data)
+          const parsedData = JSON.parse(data)
+          return {
+            sessions: parsedData.sessions,
+            pagination: parsedData.pagination
+          }
         }
       }
       return null
