@@ -1,21 +1,18 @@
 'use client';
 
 import { UserButton } from '@clerk/nextjs';
-import { useRouter } from 'next/navigation';
 
 export default function UserNav() {
-  const router = useRouter();
-
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-4">
       <UserButton 
-        afterSignOutUrl="/"
         appearance={{
           elements: {
             rootBox: 'relative',
             userButtonTrigger: 'focus:shadow-none',
           }
         }}
+        afterSignOutUrl="/"
       />
     </div>
   );

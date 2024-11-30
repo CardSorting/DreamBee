@@ -1,23 +1,36 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { clerkMiddleware } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/webhooks(.*)'
-])
+// Routes that can be accessed while signed out
+const publicRoutes = ["/", "/sign-in(.*)", "/sign-up(.*)", "/api/webhooks(.*)"];
+
+function isPublic(path: string) {
+  return publicRoutes.find((x) =>
+    path.match(new RegExp(`^${x}$`))
+  );
+}
 
 export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect()
+  if (isPublic(request.nextUrl.pathname)) {
+    return NextResponse.next();
   }
-})
 
+  try {
+    // Check authentication for protected routes
+    await auth.protect();
+    return NextResponse.next();
+  } catch (error) {
+    // Redirect to sign-in for unauthenticated requests to protected routes
+    const signInUrl = new URL('/sign-in', request.url);
+    signInUrl.searchParams.set('redirect_url', request.url);
+    return NextResponse.redirect(signInUrl);
+  }
+});
+
+// Stop Middleware running on static files and api routes
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
-  ],
-}
+    "/((?!.*\\..*|_next).*)",
+    "/"
+  ]
+};
