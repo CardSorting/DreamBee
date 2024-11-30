@@ -1,8 +1,8 @@
 'use client'
 
-import { UserButton } from '@clerk/nextjs'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import UserNav from '../components/UserNav'
 
 export default function DashboardLayout({
   children,
@@ -50,7 +50,7 @@ export default function DashboardLayout({
             </Link>
           </nav>
         </div>
-        <UserButton afterSignOutUrl="/" />
+        <UserNav />
       </header>
 
       {/* Main Content */}

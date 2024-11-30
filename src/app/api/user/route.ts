@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { docClient } from '@/utils/dynamodb/client'
+import { docClient } from '../../../utils/dynamodb/client'
 import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
 
 const USERS_TABLE = process.env.DYNAMODB_USERS_TABLE || 'users'
