@@ -45,6 +45,23 @@ if (!BUCKET_NAME) {
 }
 
 export class S3Service {
+  async uploadFile(key: string, content: string | Buffer, contentType: string): Promise<string> {
+    try {
+      const command = new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        Body: content,
+        ContentType: contentType,
+      });
+
+      await s3Client.send(command);
+      return key;
+    } catch (error) {
+      console.error('Error uploading to S3:', error);
+      throw new Error('Failed to upload file to S3');
+    }
+  }
+
   async uploadAudio(audioBuffer: ArrayBuffer, prefix: string = 'conversations'): Promise<string> {
     const key = `${prefix}/${uuidv4()}.mp3`;
     
@@ -84,7 +101,7 @@ export class S3Service {
     }
   }
 
-  async deleteAudio(key: string): Promise<void> {
+  async deleteFile(key: string): Promise<void> {
     try {
       const command = new DeleteObjectCommand({
         Bucket: BUCKET_NAME,
@@ -94,7 +111,7 @@ export class S3Service {
       await s3Client.send(command);
     } catch (error) {
       console.error('Error deleting from S3:', error);
-      throw new Error('Failed to delete audio file from S3');
+      throw new Error('Failed to delete file from S3');
     }
   }
 

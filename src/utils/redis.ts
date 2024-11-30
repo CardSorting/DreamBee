@@ -1,143 +1,182 @@
-import { Redis } from '@upstash/redis';
+import { Redis } from '@upstash/redis'
+import { REDIS_CONFIG } from './config'
 
-if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
-  throw new Error('Redis configuration missing');
+interface ConversationMetadata {
+  totalDuration: number
+  speakers: string[]
+  turnCount: number
+  createdAt: number
+  genre?: string
+  title?: string
+  description?: string
 }
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
-
-interface TimestampData {
-  characters: string[];
-  character_start_times_seconds: number[];
-  character_end_times_seconds: number[];
-}
-
-interface ConversationCache {
-  conversationId: string;
+interface ConversationData {
+  conversationId: string
   audioSegments: Array<{
-    character: string;
-    audioKey: string;
-    timestamps: TimestampData;
-    startTime: number;
-    endTime: number;
-  }>;
+    character: string
+    audioKey: string
+    timestamps: any
+    startTime: number
+    endTime: number
+  }>
   transcript: {
-    srt: string;
-    vtt: string;
-    json: any;
-  };
-  metadata: {
-    totalDuration: number;
-    speakers: string[];
-    turnCount: number;
-    createdAt: number;
-  };
+    srt: string
+    vtt: string
+    json: any
+  }
+  metadata: ConversationMetadata
 }
 
-export class RedisService {
-  private keyPrefix = 'dialogue';
-  private ttl = 60 * 60 * 24; // 24 hours
+// Test data for development
+const TEST_CONVERSATION: ConversationData = {
+  conversationId: 'test-123',
+  metadata: {
+    totalDuration: 60,
+    speakers: ['Alice', 'Bob'],
+    turnCount: 2,
+    createdAt: 1701290400000,
+    genre: 'casual',
+    title: 'Test Conversation',
+    description: 'A test conversation between Alice and Bob'
+  },
+  transcript: {
+    srt: 'test',
+    vtt: 'test',
+    json: {
+      duration: 60,
+      speakers: ['Alice', 'Bob'],
+      segments: [
+        { speaker: 'Alice', text: 'Hello, how are you?' },
+        { speaker: 'Bob', text: "I'm doing great, thanks for asking!" }
+      ]
+    }
+  },
+  audioSegments: [
+    {
+      character: 'Alice',
+      audioKey: 'test.mp3',
+      timestamps: {},
+      startTime: 0,
+      endTime: 30
+    }
+  ]
+}
 
-  private getConversationKey(conversationId: string): string {
-    return `${this.keyPrefix}:${conversationId}`;
+class RedisService {
+  private static instance: RedisService
+  private client: Redis | null = null
+  private fallbackStorage = new Map<string, any>()
+  private conversationIds = new Set<string>()
+  private initialized = false
+
+  private constructor() {
+    this.initialize()
   }
 
-  private getTimestampKey(conversationId: string): string {
-    return `${this.keyPrefix}:${conversationId}:timestamps`;
-  }
+  private initialize() {
+    if (this.initialized) return
 
-  private getSubtitleKey(conversationId: string): string {
-    return `${this.keyPrefix}:${conversationId}:subtitles`;
-  }
+    // Always initialize with test data first
+    this.initializeFallbackData()
 
-  async cacheConversation(data: ConversationCache): Promise<void> {
-    const conversationKey = this.getConversationKey(data.conversationId);
-    const timestampKey = this.getTimestampKey(data.conversationId);
-    const subtitleKey = this.getSubtitleKey(data.conversationId);
-
-    await Promise.all([
-      // Store main conversation data
-      redis.set(conversationKey, {
-        audioSegments: data.audioSegments.map(segment => ({
-          character: segment.character,
-          audioKey: segment.audioKey,
-          startTime: segment.startTime,
-          endTime: segment.endTime
-        })),
-        metadata: data.metadata
-      }, { ex: this.ttl }),
-
-      // Store timestamps separately for quick access
-      redis.set(timestampKey, data.audioSegments.map(segment => ({
-        character: segment.character,
-        timestamps: segment.timestamps
-      })), { ex: this.ttl }),
-
-      // Store subtitles separately
-      redis.set(subtitleKey, {
-        srt: data.transcript.srt,
-        vtt: data.transcript.vtt,
-        json: data.transcript.json
-      }, { ex: this.ttl })
-    ]);
-  }
-
-  async getConversation(conversationId: string): Promise<ConversationCache | null> {
-    const [conversation, timestamps, subtitles] = await Promise.all([
-      redis.get<any>(this.getConversationKey(conversationId)),
-      redis.get<any>(this.getTimestampKey(conversationId)),
-      redis.get<any>(this.getSubtitleKey(conversationId))
-    ]);
-
-    if (!conversation || !timestamps || !subtitles) {
-      return null;
+    if (REDIS_CONFIG.url && REDIS_CONFIG.token) {
+      try {
+        this.client = new Redis({
+          url: REDIS_CONFIG.url,
+          token: REDIS_CONFIG.token,
+          retry: REDIS_CONFIG.retry
+        })
+        // Cache test data in Redis as well
+        this.cacheConversation(TEST_CONVERSATION)
+          .catch(error => console.warn('Failed to cache test data in Redis:', error))
+      } catch (error) {
+        console.warn('Failed to initialize Redis client, using fallback storage:', error)
+      }
+    } else {
+      console.warn('Redis configuration missing, using fallback storage')
     }
 
-    // Merge the data back together
-    const audioSegments = conversation.audioSegments.map((segment: any, index: number) => ({
-      ...segment,
-      timestamps: timestamps[index].timestamps
-    }));
-
-    return {
-      conversationId,
-      audioSegments,
-      transcript: subtitles,
-      metadata: conversation.metadata
-    };
+    this.initialized = true
   }
 
-  async getSubtitles(conversationId: string): Promise<{ srt: string; vtt: string; json: any } | null> {
-    const subtitles = await redis.get<any>(this.getSubtitleKey(conversationId));
-    return subtitles;
+  private initializeFallbackData() {
+    // Initialize with test data
+    this.fallbackStorage.set(`conversation:${TEST_CONVERSATION.conversationId}`, TEST_CONVERSATION)
+    this.conversationIds.add(TEST_CONVERSATION.conversationId)
   }
 
-  async getTimestamps(conversationId: string): Promise<Array<{ character: string; timestamps: TimestampData }> | null> {
-    const timestamps = await redis.get<any>(this.getTimestampKey(conversationId));
-    return timestamps;
+  static getInstance(): RedisService {
+    if (!RedisService.instance) {
+      RedisService.instance = new RedisService()
+    }
+    return RedisService.instance
+  }
+
+  async cacheConversation(data: ConversationData): Promise<void> {
+    try {
+      if (this.client) {
+        await this.client.set(
+          `conversation:${data.conversationId}`,
+          JSON.stringify(data),
+          { ex: 60 * 60 * 24 * 7 } // 7 days expiration
+        )
+        await this.client.sadd('conversations', data.conversationId)
+      } else {
+        this.fallbackStorage.set(`conversation:${data.conversationId}`, data)
+        this.conversationIds.add(data.conversationId)
+      }
+    } catch (error) {
+      console.error('Error caching conversation:', error)
+      // Fallback to in-memory storage on Redis error
+      this.fallbackStorage.set(`conversation:${data.conversationId}`, data)
+      this.conversationIds.add(data.conversationId)
+    }
+  }
+
+  async getConversation(conversationId: string): Promise<ConversationData | null> {
+    try {
+      if (this.client) {
+        const data = await this.client.get<string>(`conversation:${conversationId}`)
+        return data ? JSON.parse(data) : this.fallbackStorage.get(`conversation:${conversationId}`) || null
+      } else {
+        return this.fallbackStorage.get(`conversation:${conversationId}`) || null
+      }
+    } catch (error) {
+      console.error('Error fetching conversation:', error)
+      return this.fallbackStorage.get(`conversation:${conversationId}`) || null
+    }
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
-    const keys = [
-      this.getConversationKey(conversationId),
-      this.getTimestampKey(conversationId),
-      this.getSubtitleKey(conversationId)
-    ];
-
-    await Promise.all(keys.map(key => redis.del(key)));
+    try {
+      if (this.client) {
+        await this.client.del(`conversation:${conversationId}`)
+        await this.client.srem('conversations', conversationId)
+      }
+      this.fallbackStorage.delete(`conversation:${conversationId}`)
+      this.conversationIds.delete(conversationId)
+    } catch (error) {
+      console.error('Error deleting conversation:', error)
+      this.fallbackStorage.delete(`conversation:${conversationId}`)
+      this.conversationIds.delete(conversationId)
+    }
   }
 
-  async listConversations(limit = 10): Promise<string[]> {
-    const pattern = `${this.keyPrefix}:*`;
-    const keys = await redis.keys(pattern);
-    return keys
-      .filter(key => !key.includes(':timestamps') && !key.includes(':subtitles'))
-      .map(key => key.replace(`${this.keyPrefix}:`, ''))
-      .slice(0, limit);
+  async listConversations(): Promise<string[]> {
+    try {
+      if (this.client) {
+        const ids = await this.client.smembers('conversations')
+        return ids.length > 0 ? ids : Array.from(this.conversationIds)
+      } else {
+        return Array.from(this.conversationIds)
+      }
+    } catch (error) {
+      console.error('Error listing conversations:', error)
+      return Array.from(this.conversationIds)
+    }
   }
 }
 
-export const redisService = new RedisService();
+export const redisService = RedisService.getInstance()
+export type { ConversationMetadata, ConversationData }

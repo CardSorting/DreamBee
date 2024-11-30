@@ -22,7 +22,11 @@ interface AudioUrl {
   directUrl: string
 }
 
-export default function DialogueGenerator() {
+interface DialogueGeneratorProps {
+  onGenerationComplete?: (data: any) => void
+}
+
+export default function DialogueGenerator({ onGenerationComplete }: DialogueGeneratorProps) {
   const [characters] = useState<Character[]>([
     {
       name: "Adam",
@@ -92,6 +96,14 @@ export default function DialogueGenerator() {
 
       const data = await response.json()
       setAudioUrls(data.audioUrls)
+      
+      // Call the onGenerationComplete callback with the data
+      if (onGenerationComplete) {
+        onGenerationComplete({
+          metadata: data.metadata,
+          transcript: data.transcript
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {

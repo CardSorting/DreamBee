@@ -1,13 +1,13 @@
 'use client'
 
-import DialogueGenerator from '@/app/components/DialogueGenerator'
+import AutoDialogueGenerator from '@/app/components/AutoDialogueGenerator'
 import { useState } from 'react'
 
 interface ConversationMetadata {
   totalDuration: number
   speakers: string[]
   turnCount: number
-  createdAt: number
+  genre: string
 }
 
 interface ConversationTranscript {
@@ -16,10 +16,10 @@ interface ConversationTranscript {
   json: any
 }
 
-export default function DialoguePage() {
+export default function AutoDialoguePage() {
   const [metadata, setMetadata] = useState<ConversationMetadata | null>(null)
   const [transcript, setTranscript] = useState<ConversationTranscript | null>(null)
-  const [activeTab, setActiveTab] = useState<'dialogue' | 'transcript' | 'analysis'>('dialogue')
+  const [activeTab, setActiveTab] = useState<'generator' | 'transcript' | 'analysis'>('generator')
 
   const handleGenerationComplete = (data: any) => {
     if (data.metadata) {
@@ -36,10 +36,6 @@ export default function DialoguePage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString()
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Navigation Tabs */}
@@ -47,14 +43,14 @@ export default function DialoguePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-8">
             <button
-              onClick={() => setActiveTab('dialogue')}
+              onClick={() => setActiveTab('generator')}
               className={`px-3 py-4 text-sm font-medium ${
-                activeTab === 'dialogue'
+                activeTab === 'generator'
                   ? 'border-b-2 border-blue-500 text-blue-600'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              Dialogue Generator
+              AI Script Generator
             </button>
             <button
               onClick={() => setActiveTab('transcript')}
@@ -82,9 +78,9 @@ export default function DialoguePage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'dialogue' && (
+        {activeTab === 'generator' && (
           <div className="bg-white shadow rounded-lg">
-            <DialogueGenerator onGenerationComplete={handleGenerationComplete} />
+            <AutoDialogueGenerator onGenerationComplete={handleGenerationComplete} />
           </div>
         )}
 
@@ -115,7 +111,7 @@ export default function DialoguePage() {
 
         {activeTab === 'analysis' && metadata && (
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold mb-6">Conversation Analysis</h2>
+            <h2 className="text-xl font-semibold mb-6">Script Analysis</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-gray-50 p-4 rounded">
@@ -130,8 +126,8 @@ export default function DialoguePage() {
                     <dd className="font-medium">{metadata.turnCount}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-gray-500">Created</dt>
-                    <dd className="font-medium">{formatDate(metadata.createdAt)}</dd>
+                    <dt className="text-gray-500">Genre</dt>
+                    <dd className="font-medium">{metadata.genre}</dd>
                   </div>
                 </dl>
               </div>

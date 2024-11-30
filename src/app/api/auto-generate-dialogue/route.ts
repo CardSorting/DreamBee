@@ -1,40 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { redisService } from '@/utils/redis'
-import { elevenLabs, type Character } from '@/utils/elevenlabs'
+import { anthropicService } from '@/utils/anthropic'
+import { elevenLabs } from '@/utils/elevenlabs'
 import { s3Service } from '@/utils/s3'
-import { mediaConvert } from '@/utils/mediaconvert'
-import { ConversationFlowManager } from '@/utils/conversation-flow'
+import { redisService } from '@/utils/redis'
 import { generateSRT, generateVTT, generateTranscript } from '@/utils/subtitles'
+import { ConversationFlowManager } from '@/utils/conversation-flow'
 
-// Check required environment variables
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error('Missing required environment variable: ANTHROPIC_API_KEY')
-}
-
-if (!process.env.AWS_BUCKET_NAME) {
-  throw new Error('Missing required environment variable: AWS_BUCKET_NAME')
-}
-
-// After validation, we can safely assert these as strings
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY as string
-const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME as string
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
 
-export interface DialogueRequest {
-  dialogue: Array<{
-    character: Character;
-    text: string;
-  }>;
+if (!ANTHROPIC_API_KEY) {
+  throw new Error('Missing ANTHROPIC_API_KEY environment variable')
+}
+
+if (!AWS_BUCKET_NAME) {
+  throw new Error('Missing AWS_BUCKET_NAME environment variable')
+}
+
+interface AutoGenerateRequest {
+  genre: string
+  prompt?: string
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as DialogueRequest
+    const body = await req.json() as AutoGenerateRequest
     const conversationId = uuidv4()
-    
+
     // Check if this conversation is already being processed
-    const processingKey = `processing:${conversationId}`
     const isProcessing = await redisService.getConversation(conversationId)
     if (isProcessing) {
       return NextResponse.json(
@@ -43,6 +38,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Generate script using Anthropic
+    const script = await anthropicService.generateScript(body.genre, body.prompt)
+
     // Initialize conversation flow manager
     const flowManager = new ConversationFlowManager(ANTHROPIC_API_KEY)
 
@@ -50,23 +48,28 @@ export async function POST(req: NextRequest) {
     const audioSegments = []
     let currentTime = 0
 
-    for (let i = 0; i < body.dialogue.length; i++) {
-      const { character, text } = body.dialogue[i]
+    for (let i = 0; i < script.dialogue.length; i++) {
+      const line = script.dialogue[i]
+      const character = script.characters.find(c => c.name === line.character)
       
+      if (!character) {
+        throw new Error(`Character not found: ${line.character}`)
+      }
+
       // Analyze conversation flow
-      const flowAnalysis = await flowManager.analyzeTurn(text, {
+      const flowAnalysis = await flowManager.analyzeTurn(line.text, {
         speaker: character.name,
-        previousLine: i > 0 ? body.dialogue[i-1].text : null,
-        nextLine: i < body.dialogue.length - 1 ? body.dialogue[i+1].text : null,
-        speakerChange: i > 0 && body.dialogue[i-1].character.name !== character.name,
-        currentLine: text
+        previousLine: i > 0 ? script.dialogue[i-1].text : null,
+        nextLine: i < script.dialogue.length - 1 ? script.dialogue[i+1].text : null,
+        speakerChange: i > 0 && script.dialogue[i-1].character !== line.character,
+        currentLine: line.text
       })
 
       // Apply pre-pause
       currentTime += flowAnalysis.timing.prePause
 
       // Generate speech with timing adjustments
-      const segment = await elevenLabs.generateSpeech(text, character, currentTime)
+      const segment = await elevenLabs.generateSpeech(line.text, character, currentTime)
       
       // Adjust timing based on flow analysis
       segment.startTime = currentTime
@@ -107,14 +110,6 @@ export async function POST(req: NextRequest) {
       s3Service.uploadFile(vttKey, vttContent, 'text/plain')
     ])
 
-    // Create MediaConvert job to assemble podcast
-    const segments = audioSegments.map((segment, index) => ({
-      url: audioUrls[index].directUrl,
-      startTime: segment.startTime,
-      endTime: segment.endTime,
-      speaker: segment.character.name
-    }))
-
     // Cache conversation data in Redis
     await redisService.cacheConversation({
       conversationId,
@@ -134,71 +129,34 @@ export async function POST(req: NextRequest) {
         totalDuration: transcript.duration,
         speakers: transcript.speakers,
         turnCount: transcript.segments.length,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        genre: body.genre,
+        title: script.title,
+        description: script.description
       }
-    })
-
-    // Create MediaConvert job
-    const jobId = await mediaConvert.createPodcastJob({
-      segments,
-      outputBucket: AWS_BUCKET_NAME,
-      outputKey: `conversations/${conversationId}/podcast`
     })
 
     return NextResponse.json({
       conversationId,
+      title: script.title,
+      description: script.description,
       audioUrls,
-      transcript,
-      jobId
+      metadata: {
+        totalDuration: transcript.duration,
+        speakers: transcript.speakers,
+        turnCount: transcript.segments.length,
+        genre: body.genre
+      },
+      transcript: {
+        srt: srtContent,
+        vtt: vttContent,
+        json: transcript
+      }
     })
   } catch (error) {
     console.error('Error generating dialogue:', error)
     return NextResponse.json(
       { error: 'Failed to generate dialogue' },
-      { status: 500 }
-    )
-  }
-}
-
-// Endpoint to get status/results of a conversation
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url)
-  const conversationId = url.searchParams.get('conversationId')
-
-  if (!conversationId) {
-    return NextResponse.json(
-      { error: 'Conversation ID is required' },
-      { status: 400 }
-    )
-  }
-
-  try {
-    const conversation = await redisService.getConversation(conversationId)
-    if (!conversation) {
-      return NextResponse.json(
-        { error: 'Conversation not found' },
-        { status: 404 }
-      )
-    }
-
-    // Generate fresh signed URLs for audio files
-    const audioUrls = await Promise.all(
-      conversation.audioSegments.map(async ({ character, audioKey }) => ({
-        character,
-        url: await s3Service.getSignedUrl(audioKey),
-        directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
-      }))
-    )
-
-    return NextResponse.json({
-      audioUrls,
-      metadata: conversation.metadata,
-      transcript: conversation.transcript
-    })
-  } catch (error) {
-    console.error('Error fetching conversation:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch conversation' },
       { status: 500 }
     )
   }
