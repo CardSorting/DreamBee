@@ -10,6 +10,16 @@ export interface AudioSegment {
   }
 }
 
+export interface MergedAudioData {
+  audioKey: string
+  duration: number
+  segments: {
+    character: string
+    startTime: number
+    endTime: number
+  }[]
+}
+
 export interface BaseItem {
   pk: string
   sk: string
@@ -80,6 +90,7 @@ export interface ManualDialogueItem extends BaseItem {
   status: 'processing' | 'completed' | 'error'
   isChunked: boolean
   audioSegments?: AudioSegment[]
+  mergedAudio?: MergedAudioData
   metadata: {
     totalDuration: number
     speakers: string[]

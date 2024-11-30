@@ -8,7 +8,8 @@ import {
   ManualDialogueItem,
   ChunkMetadata,
   ChunkProcessingMetadata,
-  DialogueChunkItem
+  DialogueChunkItem,
+  MergedAudioData
 } from '@/utils/dynamodb/types'
 
 const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE || 'manual-dialogues'
@@ -24,6 +25,7 @@ interface ManualDialogueData {
   isChunked?: boolean
   chunkMetadata?: DialogueChunkMetadata[]
   audioSegments?: AudioSegment[]
+  mergedAudio?: MergedAudioData
   metadata?: ChunkMetadata
   createdAt?: string
   updatedAt?: string
@@ -222,6 +224,40 @@ export async function updateManualDialogue(data: Partial<ManualDialogueData> & {
     return response.Attributes as ManualDialogueItem
   } catch (error) {
     console.error('[DynamoDB] Error updating manual dialogue:', error)
+    throw error
+  }
+}
+
+export async function updateManualDialogueMergedAudio(
+  userId: string,
+  dialogueId: string,
+  mergedAudio: MergedAudioData
+) {
+  try {
+    console.log('[DynamoDB] Updating merged audio for dialogue:', dialogueId)
+    
+    const command = new UpdateCommand({
+      TableName: MANUAL_DIALOGUES_TABLE,
+      Key: {
+        pk: `USER#${userId}`,
+        sk: `MDLG#${dialogueId}`,
+      },
+      UpdateExpression: 'SET #mergedAudio = :mergedAudio, #updatedAt = :updatedAt',
+      ExpressionAttributeNames: {
+        '#mergedAudio': 'mergedAudio',
+        '#updatedAt': 'updatedAt'
+      },
+      ExpressionAttributeValues: {
+        ':mergedAudio': mergedAudio,
+        ':updatedAt': new Date().toISOString()
+      },
+      ReturnValues: 'ALL_NEW',
+    })
+
+    const response = await docClient.send(command)
+    return response.Attributes as ManualDialogueItem
+  } catch (error) {
+    console.error('[DynamoDB] Error updating merged audio:', error)
     throw error
   }
 }
