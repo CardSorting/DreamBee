@@ -26,23 +26,26 @@ export const messageStyles = {
       : 'bg-gradient-to-br from-indigo-500 to-purple-600'}
     flex items-center justify-center
     text-white text-sm font-medium
-    shadow-md
+    shadow-lg
     transform-gpu translate-y-0
     transition-all duration-200
     group-hover:-translate-y-0.5
+    group-hover:shadow-xl
     select-none
+    ring-2 ring-white
   `,
   bubble: (isAssistant: boolean) => `
-    p-3 rounded-2xl max-w-[85%]
+    p-4 rounded-2xl max-w-[85%]
     ${isAssistant 
-      ? 'bg-white shadow-sm rounded-bl-sm border border-gray-100/80' 
-      : 'bg-indigo-600 text-white rounded-br-sm shadow-sm'}
+      ? 'bg-white shadow-md rounded-bl-sm border border-gray-100/80' 
+      : 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-br-sm shadow-md'}
     transition-all duration-200
-    hover:shadow-md
+    hover:shadow-lg
     backdrop-blur-sm
-    ${isAssistant ? 'bg-white/95' : 'bg-indigo-600/95'}
+    ${isAssistant ? 'bg-white/95' : 'from-indigo-500/95 to-indigo-600/95'}
     transform-gpu translate-y-0
     group-hover:-translate-y-0.5
     leading-relaxed
+    text-[15px]
   `
 }
