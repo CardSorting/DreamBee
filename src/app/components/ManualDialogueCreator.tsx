@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PREDEFINED_VOICES, CharacterVoice } from '@/utils/voice-config'
+import { getAudioMerger, AudioSegmentInfo } from '@/utils/audio-merger'
 
 interface DialogueTurn {
   character: string
@@ -47,6 +48,17 @@ export default function ManualDialogueCreator({
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
+  const [mergedAudioUrl, setMergedAudioUrl] = useState<string | null>(null)
+  const [isMergingAudio, setIsMergingAudio] = useState(false)
+
+  useEffect(() => {
+    // Cleanup function to revoke object URLs
+    return () => {
+      if (mergedAudioUrl) {
+        URL.revokeObjectURL(mergedAudioUrl)
+      }
+    }
+  }, [mergedAudioUrl])
 
   const addCharacter = () => {
     const newCharacter: CharacterVoice = {
@@ -107,10 +119,37 @@ export default function ManualDialogueCreator({
     setDialogue(newDialogue)
   }
 
+  const mergeAudioSegments = async (result: GenerationResult) => {
+    setIsMergingAudio(true)
+    try {
+      const segments: AudioSegmentInfo[] = result.audioUrls.map((audio, index) => ({
+        url: audio.url,
+        startTime: result.transcript.json.segments[index].startTime,
+        endTime: result.transcript.json.segments[index].endTime
+      }))
+
+      const audioMerger = getAudioMerger()
+      const mergedBlob = await audioMerger.mergeAudioSegments(segments)
+      
+      // Create URL for the merged audio
+      if (mergedAudioUrl) {
+        URL.revokeObjectURL(mergedAudioUrl)
+      }
+      const newUrl = URL.createObjectURL(mergedBlob)
+      setMergedAudioUrl(newUrl)
+    } catch (error) {
+      console.error('Error merging audio:', error)
+      setError('Failed to merge audio segments')
+    } finally {
+      setIsMergingAudio(false)
+    }
+  }
+
   const generateDialogue = async () => {
     try {
       setIsGenerating(true)
       setError(null)
+      setMergedAudioUrl(null)
 
       const response = await fetch('/api/manual-generate-dialogue', {
         method: 'POST',
@@ -131,6 +170,9 @@ export default function ManualDialogueCreator({
 
       const data = await response.json()
       setResult(data)
+      
+      // Merge audio segments
+      await mergeAudioSegments(data)
       
       if (onGenerationComplete) {
         onGenerationComplete(data)
@@ -251,7 +293,8 @@ export default function ManualDialogueCreator({
           <h3 className="text-lg font-medium text-gray-900">Dialogue</h3>
           <button
             onClick={addDialogueTurn}
-            className="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors text-sm"
+            disabled={characters.length === 0}
+            className="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
           >
             Add Turn
           </button>
@@ -345,23 +388,30 @@ export default function ManualDialogueCreator({
             </div>
           </div>
           
-          {/* Audio Players */}
+          {/* Merged Audio Player */}
           <div className="space-y-4">
             <h4 className="font-medium text-gray-900">Audio Preview</h4>
-            {result.audioUrls.map((audio, index) => (
-              <div key={index} className="flex items-center gap-4 bg-gray-50 p-3 rounded-lg">
-                <span className="w-24 text-sm font-medium text-gray-700">{audio.character}:</span>
+            {isMergingAudio ? (
+              <div className="flex items-center justify-center p-4 bg-gray-50 rounded-lg">
+                <svg className="animate-spin h-5 w-5 text-gray-500" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span className="ml-2 text-gray-600">Merging audio segments...</span>
+              </div>
+            ) : mergedAudioUrl ? (
+              <div className="bg-gray-50 p-3 rounded-lg">
                 <audio
                   controls
-                  src={audio.url}
-                  onError={(e) => {
-                    const target = e.target as HTMLAudioElement
-                    target.src = audio.directUrl
-                  }}
-                  className="flex-1"
+                  src={mergedAudioUrl}
+                  className="w-full"
                 />
               </div>
-            ))}
+            ) : (
+              <div className="p-4 bg-yellow-50 text-yellow-700 rounded-lg">
+                Failed to merge audio segments. Individual segments are still available.
+              </div>
+            )}
           </div>
         </div>
       )}
