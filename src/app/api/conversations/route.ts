@@ -8,6 +8,7 @@ import {
   deleteConversation,
   getConversation
 } from '@/utils/dynamodb'
+import { redisService } from '@/utils/redis'
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,6 +37,9 @@ export async function POST(request: NextRequest) {
       messages: data.messages || [],
       createdAt: new Date().toISOString()
     })
+
+    // Invalidate cache since we've added a new conversation
+    await redisService.invalidateChatConversations(userId)
 
     return NextResponse.json({ 
       id: conversationId,
@@ -83,8 +87,15 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Get all conversations
-    console.log('[Conversations API] Getting conversations for user:', userId)
+    // Try to get conversations from cache first
+    const cachedConversations = await redisService.getChatConversations(userId)
+    if (cachedConversations) {
+      console.log('[Conversations API] Using cached conversations for user:', userId)
+      return NextResponse.json(cachedConversations)
+    }
+
+    // If not in cache, get from DynamoDB
+    console.log('[Conversations API] Getting conversations from DynamoDB for user:', userId)
     const conversations = await getConversations(userId)
     
     // Transform conversations to match ChatSession interface
@@ -95,6 +106,9 @@ export async function GET(request: NextRequest) {
       createdAt: c.createdAt,
       updatedAt: c.updatedAt
     }))
+
+    // Cache the conversations
+    await redisService.cacheChatConversations(userId, transformedConversations)
 
     console.log('[Conversations API] Retrieved conversations:', transformedConversations.map(c => ({
       id: c.id,
@@ -169,6 +183,9 @@ export async function PUT(request: NextRequest) {
       return new NextResponse('Failed to update conversation', { status: 404 })
     }
 
+    // Invalidate cache since we've updated a conversation
+    await redisService.invalidateChatConversations(userId)
+
     // Transform conversation to match ChatSession interface
     const transformedConversation = {
       id: updatedConversation.conversationId,
@@ -214,6 +231,10 @@ export async function DELETE(request: NextRequest) {
 
     // Delete conversation from DynamoDB
     await deleteConversation(userId, conversationId)
+
+    // Invalidate cache since we've deleted a conversation
+    await redisService.invalidateChatConversations(userId)
+
     return new NextResponse(null, { status: 204 })
   } catch (error) {
     console.error('[Conversations API] Error:', error)

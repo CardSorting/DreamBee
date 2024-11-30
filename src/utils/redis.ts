@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis'
 import { REDIS_CONFIG } from './config'
+import { DialogueSession as DynamoDBDialogueSession } from './dynamodb/types'
 
 interface ConversationMetadata {
   totalDuration: number
@@ -26,6 +27,29 @@ interface ConversationData {
     json: any
   }
   metadata: ConversationMetadata
+}
+
+interface ChatConversation {
+  id: string
+  title: string
+  messages: Array<{
+    role: string
+    content: string
+    timestamp: string
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
+interface DialogueSessionsResponse {
+  sessions: DynamoDBDialogueSession[]
+  pagination: {
+    currentPage: number
+    pageSize: number
+    totalCount: number
+    totalPages: number
+    hasMore: boolean
+  }
 }
 
 // Test data for development
@@ -176,7 +200,113 @@ class RedisService {
       return Array.from(this.conversationIds)
     }
   }
+
+  // Chat conversations methods
+  async cacheChatConversations(userId: string, conversations: ChatConversation[]): Promise<void> {
+    try {
+      if (this.client) {
+        const key = `chat:${userId}:conversations`
+        await this.client.set(key, JSON.stringify(conversations), {
+          ex: 300 // 5 minutes expiration
+        })
+        console.log('[Redis] Cached chat conversations for user:', userId)
+      }
+    } catch (error) {
+      console.error('[Redis] Error caching chat conversations:', error)
+    }
+  }
+
+  async getChatConversations(userId: string): Promise<ChatConversation[] | null> {
+    try {
+      if (this.client) {
+        const key = `chat:${userId}:conversations`
+        const data = await this.client.get<string>(key)
+        if (data) {
+          console.log('[Redis] Cache hit for chat conversations:', userId)
+          return JSON.parse(data)
+        }
+      }
+      return null
+    } catch (error) {
+      console.error('[Redis] Error fetching chat conversations:', error)
+      return null
+    }
+  }
+
+  async invalidateChatConversations(userId: string): Promise<void> {
+    try {
+      if (this.client) {
+        const key = `chat:${userId}:conversations`
+        await this.client.del(key)
+        console.log('[Redis] Invalidated chat conversations cache for user:', userId)
+      }
+    } catch (error) {
+      console.error('[Redis] Error invalidating chat conversations cache:', error)
+    }
+  }
+
+  // Manual dialogue sessions methods
+  async cacheDialogueSessions(
+    userId: string, 
+    dialogueId: string, 
+    page: number, 
+    response: DialogueSessionsResponse
+  ): Promise<void> {
+    try {
+      if (this.client) {
+        const key = `dialogue:${userId}:${dialogueId}:sessions:${page}`
+        await this.client.set(key, JSON.stringify(response), {
+          ex: 300 // 5 minutes expiration
+        })
+        console.log('[Redis] Cached dialogue sessions for user:', userId, 'dialogue:', dialogueId, 'page:', page)
+      }
+    } catch (error) {
+      console.error('[Redis] Error caching dialogue sessions:', error)
+    }
+  }
+
+  async getDialogueSessions(
+    userId: string, 
+    dialogueId: string, 
+    page: number
+  ): Promise<DialogueSessionsResponse | null> {
+    try {
+      if (this.client) {
+        const key = `dialogue:${userId}:${dialogueId}:sessions:${page}`
+        const data = await this.client.get<string>(key)
+        if (data) {
+          console.log('[Redis] Cache hit for dialogue sessions:', userId, 'dialogue:', dialogueId, 'page:', page)
+          return JSON.parse(data)
+        }
+      }
+      return null
+    } catch (error) {
+      console.error('[Redis] Error fetching dialogue sessions:', error)
+      return null
+    }
+  }
+
+  async invalidateDialogueSessions(userId: string, dialogueId: string): Promise<void> {
+    try {
+      if (this.client) {
+        // Get all keys matching the pattern
+        const pattern = `dialogue:${userId}:${dialogueId}:sessions:*`
+        const keys = await this.client.keys(pattern)
+        if (keys.length > 0) {
+          await this.client.del(...keys)
+          console.log('[Redis] Invalidated dialogue sessions cache for user:', userId, 'dialogue:', dialogueId)
+        }
+      }
+    } catch (error) {
+      console.error('[Redis] Error invalidating dialogue sessions cache:', error)
+    }
+  }
 }
 
 export const redisService = RedisService.getInstance()
-export type { ConversationMetadata, ConversationData }
+export type { 
+  ConversationMetadata, 
+  ConversationData, 
+  ChatConversation,
+  DialogueSessionsResponse 
+}

@@ -1,6 +1,6 @@
 import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
-import { docClient } from '@/utils/dynamodb/client'
-import { CharacterVoice } from '@/utils/voice-config'
+import { docClient } from './client'
+import { CharacterVoice } from '../voice-config'
 import { 
   AudioSegment,
   DialogueChunkMetadata,
@@ -11,7 +11,7 @@ import {
   DialogueChunkItem,
   MergedAudioData,
   DialogueSession
-} from '@/utils/dynamodb/types'
+} from './types'
 
 const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE || 'manual-dialogues'
 
@@ -30,6 +30,12 @@ interface ManualDialogueData {
   metadata?: ChunkMetadata
   createdAt?: string
   updatedAt?: string
+}
+
+interface PaginatedSessions {
+  sessions: DialogueSession[]
+  totalCount: number
+  hasMore: boolean
 }
 
 export async function createDialogueSession(
@@ -320,15 +326,32 @@ export async function getDialogueSession(
 
 export async function getDialogueSessions(
   userId: string,
-  dialogueId: string
-): Promise<DialogueSession[]> {
+  dialogueId: string,
+  page: number = 1,
+  pageSize: number = 12
+): Promise<PaginatedSessions> {
   try {
     const dialogue = await getManualDialogue(userId, dialogueId)
     if (!dialogue) {
-      return []
+      return {
+        sessions: [],
+        totalCount: 0,
+        hasMore: false
+      }
     }
 
-    return dialogue.sessions
+    // Sort sessions by createdAt in descending order
+    const sortedSessions = [...dialogue.sessions].sort((a, b) => b.createdAt - a.createdAt)
+    
+    const startIndex = (page - 1) * pageSize
+    const endIndex = startIndex + pageSize
+    const paginatedSessions = sortedSessions.slice(startIndex, endIndex)
+
+    return {
+      sessions: paginatedSessions,
+      totalCount: dialogue.sessions.length,
+      hasMore: endIndex < dialogue.sessions.length
+    }
   } catch (error) {
     console.error('[DynamoDB] Error getting dialogue sessions:', error)
     throw error

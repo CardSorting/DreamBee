@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { PREDEFINED_VOICES, CharacterVoice } from '@/utils/voice-config'
-import { getAudioMerger, AudioSegmentInfo } from '@/utils/audio-merger'
-import { DialogueSession } from '@/utils/dynamodb/types'
-import SessionHistory from './SessionHistory'
+import { PREDEFINED_VOICES, CharacterVoice } from '../../utils/voice-config'
+import { getAudioMerger, AudioSegmentInfo } from '../../utils/audio-merger'
+import { DialogueSession } from '../../utils/dynamodb/types'
 
 interface DialogueTurn {
   character: string
@@ -40,10 +39,12 @@ const defaultCharacter: CharacterVoice = {
 
 export default function ManualDialogueCreator({
   onGenerationComplete,
-  dialogueId
+  dialogueId,
+  onSessionUpdate
 }: {
   onGenerationComplete?: (result: GenerationResult) => void
   dialogueId?: string
+  onSessionUpdate?: (sessions: DialogueSession[]) => void
 }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -54,16 +55,6 @@ export default function ManualDialogueCreator({
   const [result, setResult] = useState<GenerationResult | null>(null)
   const [mergedAudioUrl, setMergedAudioUrl] = useState<string | null>(null)
   const [isMergingAudio, setIsMergingAudio] = useState(false)
-  const [sessions, setSessions] = useState<DialogueSession[]>([])
-  const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(undefined)
-  const [isLoadingSessions, setIsLoadingSessions] = useState(false)
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
-
-  useEffect(() => {
-    if (dialogueId) {
-      loadSessions()
-    }
-  }, [dialogueId])
 
   useEffect(() => {
     // Cleanup function to revoke object URLs
@@ -73,43 +64,6 @@ export default function ManualDialogueCreator({
       }
     }
   }, [mergedAudioUrl])
-
-  const loadSessions = async () => {
-    if (!dialogueId) return
-    
-    setIsLoadingSessions(true)
-    try {
-      const response = await fetch(`/api/manual-generate-dialogue/sessions/${dialogueId}`)
-      if (!response.ok) {
-        throw new Error('Failed to load sessions')
-      }
-      const data = await response.json()
-      setSessions(data.sessions)
-      
-      // If there are sessions and none is selected, select the most recent one
-      if (data.sessions.length > 0 && !selectedSessionId) {
-        const mostRecentSession = data.sessions[data.sessions.length - 1]
-        setSelectedSessionId(mostRecentSession.sessionId)
-        loadSession(mostRecentSession)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sessions')
-    } finally {
-      setIsLoadingSessions(false)
-    }
-  }
-
-  const loadSession = (session: DialogueSession) => {
-    setTitle(session.title)
-    setDescription(session.description)
-    setCharacters(session.characters)
-    setDialogue(session.dialogue)
-    if (session.mergedAudio) {
-      setMergedAudioUrl(session.mergedAudio.audioKey)
-    }
-    setSelectedSessionId(session.sessionId)
-    setIsHistoryOpen(false)
-  }
 
   const addCharacter = () => {
     const newCharacter: CharacterVoice = {
@@ -231,9 +185,15 @@ export default function ManualDialogueCreator({
         onGenerationComplete(data)
       }
 
-      // Reload sessions after generation
+      // Fetch updated sessions after generation
       if (dialogueId) {
-        loadSessions()
+        const sessionsResponse = await fetch(`/api/manual-generate-dialogue/sessions/${dialogueId}`)
+        if (sessionsResponse.ok) {
+          const sessionsData = await sessionsResponse.json()
+          if (onSessionUpdate) {
+            onSessionUpdate(sessionsData.sessions)
+          }
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -244,21 +204,6 @@ export default function ManualDialogueCreator({
 
   return (
     <div className="space-y-8">
-      {/* Header with History Button */}
-      <div className="flex justify-between items-center">
-        {dialogueId && (
-          <button
-            onClick={() => setIsHistoryOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Session History
-          </button>
-        )}
-      </div>
-
       {/* Title and Description */}
       <div className="space-y-4">
         <div>
@@ -488,15 +433,6 @@ export default function ManualDialogueCreator({
           </div>
         </div>
       )}
-
-      {/* Session History Modal/Drawer */}
-      <SessionHistory
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        sessions={sessions}
-        onSelectSession={loadSession}
-        selectedSessionId={selectedSessionId}
-      />
     </div>
   )
 }

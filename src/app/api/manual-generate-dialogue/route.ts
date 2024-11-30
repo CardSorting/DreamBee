@@ -99,6 +99,9 @@ export async function POST(req: NextRequest) {
         } as ChunkMetadata
       })
 
+      // Invalidate cache for this dialogue's sessions
+      await redisService.invalidateDialogueSessions(userId, dialogueId)
+
       // Process first chunk immediately, queue others for background processing
       const firstChunk = chunks[0]
       const result = await processDialogueChunk(
@@ -132,6 +135,9 @@ export async function POST(req: NextRequest) {
         totalChunks: 1
       }
     )
+
+    // Invalidate cache for this dialogue's sessions
+    await redisService.invalidateDialogueSessions(userId, dialogueId)
 
     return NextResponse.json({
       dialogueId,
@@ -250,6 +256,9 @@ async function processDialogueChunk(
 
   // Update chunk metadata
   chunkMetadata.status = 'completed'
+
+  // Invalidate cache for this dialogue's sessions since we've updated it
+  await redisService.invalidateDialogueSessions(userId, dialogueId)
 
   return {
     title: chunk.title,

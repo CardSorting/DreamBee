@@ -1,17 +1,4 @@
-export const PREDEFINED_VOICES = {
-  male: [
-    { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam' },
-    { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Josh' },
-    { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Arnold' }
-  ],
-  female: [
-    { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah' },
-    { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel' },
-    { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi' }
-  ]
-} as const
-
-export interface VoiceOption {
+export interface Voice {
   id: string
   name: string
 }
@@ -21,3 +8,16 @@ export interface CharacterVoice {
   voiceId: string
   gender: 'male' | 'female'
 }
+
+export const PREDEFINED_VOICES = {
+  male: [
+    { id: 'adam', name: 'Adam' },
+    { id: 'josh', name: 'Josh' },
+    { id: 'michael', name: 'Michael' }
+  ],
+  female: [
+    { id: 'sarah', name: 'Sarah' },
+    { id: 'emily', name: 'Emily' },
+    { id: 'rachel', name: 'Rachel' }
+  ]
+} as const;

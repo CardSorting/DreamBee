@@ -1,39 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
-import { getManualDialogue } from '@/utils/dynamodb/manual-dialogues'
+import { getAuth } from '@clerk/nextjs/server'
+import { getDialogueSessions } from '../../../../../utils/dynamodb/manual-dialogues'
+import { redisService } from '../../../../../utils/redis'
 
 export async function GET(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: { dialogueId: string } }
 ) {
   try {
-    const authResult = await auth()
-    if (!authResult?.userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+    const { userId } = getAuth(request)
+    if (!userId) {
+      return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const userId = authResult.userId
-    const { dialogueId } = params
+    const { searchParams } = new URL(request.url)
+    const page = parseInt(searchParams.get('page') || '1')
+    const pageSize = parseInt(searchParams.get('pageSize') || '12')
 
-    const dialogue = await getManualDialogue(userId, dialogueId)
-    if (!dialogue) {
-      return NextResponse.json(
-        { error: 'Dialogue not found' },
-        { status: 404 }
-      )
+    // Try to get from cache first
+    const cachedData = await redisService.getDialogueSessions(userId, params.dialogueId, page)
+    if (cachedData) {
+      console.log('[Manual Dialogue Sessions API] Using cached data for dialogue:', params.dialogueId, 'page:', page)
+      return NextResponse.json(cachedData)
     }
+
+    // If not in cache, get from DynamoDB
+    console.log('[Manual Dialogue Sessions API] Getting data from DynamoDB for dialogue:', params.dialogueId, 'page:', page)
+    const response = await getDialogueSessions(
+      userId,
+      params.dialogueId,
+      page,
+      pageSize
+    )
+
+    // Cache the response
+    await redisService.cacheDialogueSessions(userId, params.dialogueId, page, {
+      sessions: response.sessions,
+      pagination: {
+        currentPage: page,
+        pageSize,
+        totalCount: response.totalCount,
+        totalPages: Math.ceil(response.totalCount / pageSize),
+        hasMore: response.hasMore
+      }
+    })
 
     return NextResponse.json({
-      sessions: dialogue.sessions || []
+      sessions: response.sessions,
+      pagination: {
+        currentPage: page,
+        pageSize,
+        totalCount: response.totalCount,
+        totalPages: Math.ceil(response.totalCount / pageSize),
+        hasMore: response.hasMore
+      }
     })
   } catch (error) {
-    console.error('Error getting dialogue sessions:', error)
-    return NextResponse.json(
-      { error: 'Failed to get dialogue sessions' },
-      { status: 500 }
-    )
+    console.error('[Manual Dialogue Sessions API] Error:', error)
+    return new NextResponse('Internal Server Error', { status: 500 })
   }
 }
