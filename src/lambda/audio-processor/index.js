@@ -25,6 +25,9 @@ const FFMPEG_PATHS = [
     '/usr/local/bin/ffmpeg'
 ];
 
+// Silence duration in seconds
+const SILENCE_DURATION = 0.5;
+
 class ProcessingError extends Error {
     constructor(message, details = null) {
         super(message);
@@ -152,8 +155,22 @@ async function runFFmpeg(args, ffmpegPath) {
     });
 }
 
+async function generateSilence(duration, outputPath, ffmpegPath) {
+    console.log(`Generating ${duration}s silence at ${outputPath}`);
+    const args = [
+        '-f', 'lavfi',
+        '-i', `anullsrc=r=44100:cl=stereo`,
+        '-t', duration.toString(),
+        '-acodec', 'pcm_s16le',
+        '-y',
+        outputPath
+    ];
+    await runFFmpeg(args, ffmpegPath);
+    return outputPath;
+}
+
 async function processAudioSegment(segment, index, tempDir, ffmpegPath) {
-    console.log(`Processing segment ${index}:`, segment);
+    console.log(`Processing segment ${index} of type ${typeof index}:`, segment);
     
     const inputPath = path.join(tempDir, `input_${index}.mp3`);
     const outputPath = path.join(tempDir, `segment_${index}.wav`);
@@ -164,7 +181,7 @@ async function processAudioSegment(segment, index, tempDir, ffmpegPath) {
 
         // Verify the file exists and has content
         const stats = await stat(inputPath);
-        console.log(`Downloaded file size: ${stats.size} bytes`);
+        console.log(`Downloaded file size for segment ${index}: ${stats.size} bytes`);
         if (stats.size === 0) {
             throw new ProcessingError('Downloaded file is empty', { path: inputPath });
         }
@@ -185,7 +202,7 @@ async function processAudioSegment(segment, index, tempDir, ffmpegPath) {
 
         // Verify output file
         const outStats = await stat(outputPath);
-        console.log(`Processed file size: ${outStats.size} bytes`);
+        console.log(`Processed file size for segment ${index}: ${outStats.size} bytes`);
         if (outStats.size === 0) {
             throw new ProcessingError('Processed file is empty', { path: outputPath });
         }
@@ -204,9 +221,19 @@ async function mergeAudioFiles(segmentFiles, outputPath, ffmpegPath) {
     console.log('Merging audio files:', segmentFiles);
     
     try {
-        // Create a file list for FFmpeg
+        // Generate silence file
+        const silencePath = path.join(path.dirname(segmentFiles[0]), 'silence.wav');
+        await generateSilence(SILENCE_DURATION, silencePath, ffmpegPath);
+
+        // Create a file list for FFmpeg with silence between segments
         const listPath = path.join(path.dirname(segmentFiles[0]), 'files.txt');
-        const fileList = segmentFiles.map(file => `file '${file}'`).join('\n');
+        const fileList = segmentFiles.map((file, index) => {
+            if (index === 0) {
+                return `file '${file}'`;
+            }
+            return `file '${silencePath}'\nfile '${file}'`;
+        }).join('\n');
+        
         await writeFile(listPath, fileList);
         console.log('Created concat file list:', fileList);
 
@@ -278,11 +305,14 @@ exports.handler = async (event) => {
 
         // Process each segment
         console.log(`Processing ${segments.length} segments`);
-        const segmentPromises = segments.map((segment, index) => 
-            processAudioSegment(segment, index, tempDir, ffmpegPath)
-        );
+        const segmentPromises = segments.map((segment, index) => {
+            console.log(`Creating promise for segment ${index}`);
+            return processAudioSegment(segment, index, tempDir, ffmpegPath);
+        });
+        
+        console.log(`Created ${segmentPromises.length} segment promises`);
         const processedSegments = await Promise.all(segmentPromises);
-        console.log('All segments processed');
+        console.log('All segments processed:', processedSegments);
 
         // Merge all segments
         const outputPath = path.join(tempDir, 'final_output.wav');
