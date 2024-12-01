@@ -74,16 +74,16 @@ export function generateVTT(segments: AudioSegment[]): string {
 interface WordTiming {
   word: string
   speaker: string
-  start: number
-  end: number
+  startTime: number
+  endTime: number
 }
 
 interface TranscriptSegment {
   speaker: string
   text: string
   words: WordTiming[]
-  start: number
-  end: number
+  startTime: number
+  endTime: number
 }
 
 interface Transcript {
@@ -105,8 +105,8 @@ export function generateTranscript(segments: AudioSegment[]): Transcript {
       const timing: WordTiming = {
         word,
         speaker: segment.character.name,
-        start: segment.timestamps.character_start_times_seconds[wordStartInText],
-        end: segment.timestamps.character_end_times_seconds[wordEndInText - 1]
+        startTime: segment.timestamps.character_start_times_seconds[wordStartInText],
+        endTime: segment.timestamps.character_end_times_seconds[wordEndInText - 1]
       }
       
       wordStartIndex = wordEndInText
@@ -117,14 +117,14 @@ export function generateTranscript(segments: AudioSegment[]): Transcript {
       speaker: segment.character.name,
       text: text.trim(),
       words: wordTimings,
-      start: segment.startTime,
-      end: segment.endTime
+      startTime: segment.startTime,
+      endTime: segment.endTime
     }
   })
 
   return {
     segments: transcript,
     duration: Math.max(...segments.map(s => s.endTime)),
-    speakers: [...new Set(segments.map(s => s.character.name))]
+    speakers: Array.from(new Set(segments.map(s => s.character.name)))
   }
 }

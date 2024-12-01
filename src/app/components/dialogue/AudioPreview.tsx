@@ -21,6 +21,8 @@ interface GenerationResult {
     vtt: string
     json: {
       segments: Array<{
+        speaker: string
+        text: string
         startTime: number
         endTime: number
       }>
