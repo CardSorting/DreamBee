@@ -136,6 +136,53 @@ class RedisService {
     }
   }
 
+  // Generated conversation methods
+  async cacheGeneratedConversation(conversationData: ConversationData): Promise<void> {
+    const key = `generated:${conversationData.conversationId}`
+    
+    try {
+      const value = JSON.stringify(conversationData)
+      
+      // Store in fallback storage
+      this.fallbackStorage.set(key, value)
+
+      // Store in Redis if available
+      if (this.client) {
+        await this.client.set(key, value, { ex: 3600 }) // 1 hour
+        console.log('[Redis] Cached generated conversation:', conversationData.conversationId)
+      }
+    } catch (error) {
+      console.error('[Redis] Error caching generated conversation:', error)
+    }
+  }
+
+  async getGeneratedConversation(conversationId: string): Promise<ConversationData | null> {
+    const key = `generated:${conversationId}`
+
+    try {
+      // Try Redis first if available
+      if (this.client) {
+        const redisData = await this.client.get(key)
+        if (redisData) {
+          console.log('[Redis] Cache hit for generated conversation:', conversationId)
+          return typeof redisData === 'string' ? JSON.parse(redisData) : redisData
+        }
+      }
+
+      // Try fallback storage
+      const fallbackData = this.fallbackStorage.get(key)
+      if (fallbackData) {
+        console.log('[Redis] Fallback cache hit for generated conversation:', conversationId)
+        return JSON.parse(fallbackData)
+      }
+
+      return null
+    } catch (error) {
+      console.error('[Redis] Error fetching generated conversation:', error)
+      return null
+    }
+  }
+
   async invalidateChatConversations(userId: string): Promise<void> {
     const key = `chat:${userId}:conversations`
     this.fallbackStorage.delete(key)

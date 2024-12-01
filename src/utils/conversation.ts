@@ -69,6 +69,12 @@ export class ConversationManager {
     });
   }
 
+  private getSpeakerNames(): string[] {
+    const names: string[] = [];
+    this.speakers.forEach((_, key) => names.push(key));
+    return names;
+  }
+
   parseConversation(text: string): DialogueLine[] {
     // Parse format like "[adam] hello how are you? [sarah] I'm good!"
     const lines = text.split(/\[([^\]]+)\]\s*([^[]+)/).filter(Boolean);
@@ -96,10 +102,11 @@ export class ConversationManager {
   }
 
   generateTranscript(segments: ConversationSegment[]): ConversationTranscript {
+    const speakerNames = this.getSpeakerNames();
     const transcript: ConversationTranscript = {
       metadata: {
         duration: Math.max(...segments.map(s => s.endTime)),
-        speakers: Array.from(this.speakers.keys()),
+        speakers: speakerNames,
         turnCount: segments.length
       },
       turns: [],
@@ -107,13 +114,13 @@ export class ConversationManager {
     };
 
     // Initialize speaker transcripts
-    for (const speaker of this.speakers.keys()) {
+    speakerNames.forEach(speaker => {
       transcript.speakerTranscripts[speaker] = {
         lines: [],
         totalDuration: 0,
         wordCount: 0
       };
-    }
+    });
 
     // Process each segment
     segments.forEach((segment, index) => {

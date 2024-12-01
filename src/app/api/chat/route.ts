@@ -3,9 +3,9 @@ import { NextResponse } from 'next/server'
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '')
 const model = genAI.getGenerativeModel({ 
-  model: "gemini-1.5-flash",
+  model: "gemini-1.5-flash-8b",
   generationConfig: {
-    maxOutputTokens: 1024,
+    maxOutputTokens: 2000,
     temperature: 0.7,
   }
 })

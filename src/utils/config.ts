@@ -39,7 +39,7 @@ export const ELEVENLABS_CONFIG = {
   apiKey: process.env.ELEVENLABS_API_KEY,
 }
 
-// Anthropic configuration
-export const ANTHROPIC_CONFIG = {
-  apiKey: process.env.ANTHROPIC_API_KEY,
+// Google AI configuration
+export const GOOGLE_AI_CONFIG = {
+  apiKey: process.env.GOOGLE_API_KEY,
 }

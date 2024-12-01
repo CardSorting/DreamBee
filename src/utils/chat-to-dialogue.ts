@@ -28,12 +28,12 @@ export class ChatToDialogueAdapter {
   private flowManager: ConversationFlowManager
 
   private constructor() {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new Error('Missing ANTHROPIC_API_KEY environment variable')
+    if (!process.env.GOOGLE_API_KEY) {
+      throw new Error('Missing GOOGLE_API_KEY environment variable')
     }
-    this.dialogueAnalyzer = new DialogueAnalyzer(process.env.ANTHROPIC_API_KEY)
-    this.prosodyAnalyzer = new ProsodyAnalyzer(process.env.ANTHROPIC_API_KEY)
-    this.flowManager = new ConversationFlowManager(process.env.ANTHROPIC_API_KEY)
+    this.dialogueAnalyzer = new DialogueAnalyzer(process.env.GOOGLE_API_KEY)
+    this.prosodyAnalyzer = new ProsodyAnalyzer(process.env.GOOGLE_API_KEY)
+    this.flowManager = new ConversationFlowManager(process.env.GOOGLE_API_KEY)
   }
 
   static getInstance(): ChatToDialogueAdapter {

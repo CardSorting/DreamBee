@@ -6,14 +6,14 @@ import { s3Service } from '@/utils/s3'
 import { generateSRT, generateVTT, generateTranscript } from '@/utils/subtitles'
 import { ConversationFlowManager } from '@/utils/conversation-flow'
 import { chatToDialogue } from '@/utils/chat-to-dialogue'
-import { createConversation, updateConversation } from '@/utils/dynamodb'
+import { createConversation, updateConversation } from '@/utils/dynamodb/conversations'
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
 
-if (!ANTHROPIC_API_KEY) {
-  throw new Error('Missing ANTHROPIC_API_KEY environment variable')
+if (!GOOGLE_API_KEY) {
+  throw new Error('Missing GOOGLE_API_KEY environment variable')
 }
 
 if (!AWS_BUCKET_NAME) {
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     const script = await chatToDialogue.convertToScript(session)
 
     // Initialize conversation flow manager
-    const flowManager = new ConversationFlowManager(ANTHROPIC_API_KEY)
+    const flowManager = new ConversationFlowManager(GOOGLE_API_KEY)
 
     // Process messages in chunks of 5
     const chunkSize = 5

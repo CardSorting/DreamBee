@@ -12,14 +12,14 @@ import { auth } from '@clerk/nextjs/server'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY
 
 if (!AWS_BUCKET_NAME) {
   throw new Error('Missing AWS_BUCKET_NAME environment variable')
 }
 
-if (!ANTHROPIC_API_KEY) {
-  throw new Error('Missing ANTHROPIC_API_KEY environment variable')
+if (!GOOGLE_API_KEY) {
+  throw new Error('Missing GOOGLE_API_KEY environment variable')
 }
 
 interface DialogueTurn {
@@ -166,7 +166,7 @@ async function processDialogueChunk(
   }
 ) {
   // Initialize conversation flow manager
-  const flowManager = new ConversationFlowManager(ANTHROPIC_API_KEY)
+  const flowManager = new ConversationFlowManager(GOOGLE_API_KEY)
 
   // Create chunk record in DynamoDB
   const chunkMetadata: ChunkProcessingMetadata = {

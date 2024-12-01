@@ -1,11 +1,16 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from "@google/generative-ai"
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error('Missing ANTHROPIC_API_KEY environment variable')
+if (!process.env.GOOGLE_API_KEY) {
+  throw new Error('Missing GOOGLE_API_KEY environment variable')
 }
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-1.5-flash-8b",
+  generationConfig: {
+    maxOutputTokens: 2000,
+    temperature: 0.7,
+  }
 })
 
 interface Character {
@@ -28,8 +33,8 @@ interface GeneratedScript {
   estimatedDuration: number
 }
 
-export class AnthropicService {
-  private static instance: AnthropicService
+export class GeminiService {
+  private static instance: GeminiService
   private characters: Character[] = [
     {
       name: "Adam",
@@ -45,11 +50,11 @@ export class AnthropicService {
 
   private constructor() {}
 
-  static getInstance(): AnthropicService {
-    if (!AnthropicService.instance) {
-      AnthropicService.instance = new AnthropicService()
+  static getInstance(): GeminiService {
+    if (!GeminiService.instance) {
+      GeminiService.instance = new GeminiService()
     }
-    return AnthropicService.instance
+    return GeminiService.instance
   }
 
   async generateScript(genre: string, prompt?: string): Promise<GeneratedScript> {
@@ -75,25 +80,23 @@ export class AnthropicService {
     ${prompt ? `Additional context: ${prompt}` : ''}`
 
     try {
-      const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 2000,
-        temperature: 0.7,
-        system: systemPrompt,
-        messages: [{
-          role: 'user',
-          content: 'Generate a dialogue scene.'
-        }]
+      const chat = model.startChat({
+        history: [],
+        generationConfig: {
+          maxOutputTokens: 2000,
+          temperature: 0.7,
+        }
       })
 
-      // Get the response content
-      const content = response.content[0]
-      if (!('type' in content) || content.type !== 'text') {
-        throw new Error('Unexpected response format from Anthropic API')
-      }
+      const result = await chat.sendMessage([
+        { text: systemPrompt },
+        { text: 'Generate a dialogue scene.' }
+      ])
+
+      const response = result.response.text()
 
       // Extract JSON from the response
-      const jsonMatch = content.text.match(/\{[\s\S]*\}/)
+      const jsonMatch = response.match(/\{[\s\S]*\}/)
       if (!jsonMatch) {
         throw new Error('Failed to parse script from response')
       }
@@ -121,4 +124,4 @@ export class AnthropicService {
   }
 }
 
-export const anthropicService = AnthropicService.getInstance()
+export const geminiService = GeminiService.getInstance()

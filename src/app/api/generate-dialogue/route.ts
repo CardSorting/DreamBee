@@ -8,8 +8,8 @@ import { ConversationFlowManager } from '@/utils/conversation-flow'
 import { generateSRT, generateVTT, generateTranscript } from '@/utils/subtitles'
 
 // Check required environment variables
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error('Missing required environment variable: ANTHROPIC_API_KEY')
+if (!process.env.GOOGLE_API_KEY) {
+  throw new Error('Missing required environment variable: GOOGLE_API_KEY')
 }
 
 if (!process.env.AWS_BUCKET_NAME) {
@@ -17,7 +17,7 @@ if (!process.env.AWS_BUCKET_NAME) {
 }
 
 // After validation, we can safely assert these as strings
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY as string
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY as string
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME as string
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
 
@@ -28,15 +28,22 @@ export interface DialogueRequest {
   }>;
 }
 
+interface AudioSegment {
+  character: string;
+  audioKey: string;
+  timestamps?: any;
+  startTime: number;
+  endTime: number;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as DialogueRequest
     const conversationId = uuidv4()
     
     // Check if this conversation is already being processed
-    const processingKey = `processing:${conversationId}`
-    const isProcessing = await redisService.getConversation(conversationId)
-    if (isProcessing) {
+    const existingConversation = await redisService.getGeneratedConversation(conversationId)
+    if (existingConversation) {
       return NextResponse.json(
         { error: 'This conversation is already being processed' },
         { status: 409 }
@@ -44,7 +51,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Initialize conversation flow manager
-    const flowManager = new ConversationFlowManager(ANTHROPIC_API_KEY)
+    const flowManager = new ConversationFlowManager(GOOGLE_API_KEY)
 
     // Process each line with conversation flow analysis
     const audioSegments = []
@@ -89,7 +96,7 @@ export async function POST(req: NextRequest) {
 
     // Get signed URLs for all uploaded audio segments
     const audioUrls = await Promise.all(
-      uploads.map(async ({ character, audioKey }) => ({
+      uploads.map(async ({ character, audioKey }: { character: string; audioKey: string }) => ({
         character,
         url: await s3Service.getSignedUrl(audioKey),
         directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
@@ -116,7 +123,7 @@ export async function POST(req: NextRequest) {
     }))
 
     // Cache conversation data in Redis
-    await redisService.cacheConversation({
+    await redisService.cacheGeneratedConversation({
       conversationId,
       audioSegments: audioSegments.map((segment, index) => ({
         character: segment.character.name,
@@ -173,7 +180,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const conversation = await redisService.getConversation(conversationId)
+    const conversation = await redisService.getGeneratedConversation(conversationId)
     if (!conversation) {
       return NextResponse.json(
         { error: 'Conversation not found' },
@@ -183,10 +190,10 @@ export async function GET(req: NextRequest) {
 
     // Generate fresh signed URLs for audio files
     const audioUrls = await Promise.all(
-      conversation.audioSegments.map(async ({ character, audioKey }) => ({
-        character,
-        url: await s3Service.getSignedUrl(audioKey),
-        directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
+      conversation.audioSegments.map(async (segment: AudioSegment) => ({
+        character: segment.character,
+        url: await s3Service.getSignedUrl(segment.audioKey),
+        directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${segment.audioKey}`
       }))
     )
 

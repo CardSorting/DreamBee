@@ -64,14 +64,14 @@ export class DialogueAnalyzer {
   }
 
   private calculateTopicContinuity(current: string, previous: string): number {
-    const currentWords = new Set(current.toLowerCase().split(/\s+/));
-    const previousWords = new Set(previous.toLowerCase().split(/\s+/));
+    const currentWords = current.toLowerCase().split(/\s+/);
+    const previousWords = previous.toLowerCase().split(/\s+/);
     
-    // Calculate word overlap
-    const intersection = new Set([...currentWords].filter(x => previousWords.has(x)));
-    const union = new Set([...currentWords, ...previousWords]);
+    // Calculate word overlap using arrays instead of Sets
+    const intersection = currentWords.filter(word => previousWords.includes(word));
+    const union = Array.from(new Set([...currentWords, ...previousWords]));
     
-    return intersection.size / union.size;
+    return intersection.length / union.length;
   }
 
   private isDirectResponse(current: string, previous: string): boolean {

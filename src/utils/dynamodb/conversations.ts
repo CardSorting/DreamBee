@@ -19,6 +19,23 @@ export interface ConversationItem {
   createdAt: string
   updatedAt: string
   sortKey: string
+  status?: 'processing' | 'completed' | 'error'
+  progress?: number
+  audioSegments?: Array<{
+    character: string
+    audioKey: string
+    startTime: number
+    endTime: number
+  }>
+  metadata?: {
+    totalDuration?: number
+    speakers?: string[]
+    turnCount?: number
+    createdAt?: number
+    genre?: string
+    title?: string
+    description?: string
+  }
 }
 
 export interface ConversationMetadata {
@@ -150,10 +167,23 @@ export async function createConversation(data: {
   conversationId: string
   title: string
   messages: any[]
+  createdAt?: string
+  updatedAt?: string
+  status?: 'processing' | 'completed' | 'error'
+  progress?: number
+  metadata?: {
+    totalDuration?: number
+    speakers?: string[]
+    turnCount?: number
+    createdAt?: number
+    genre?: string
+    title?: string
+    description?: string
+  }
 }) {
   try {
     console.log('[DynamoDB] Creating conversation:', data)
-    const now = new Date().toISOString()
+    const now = data.createdAt || new Date().toISOString()
     
     const item: ConversationItem = {
       pk: `USER#${data.userId}`,
@@ -164,8 +194,11 @@ export async function createConversation(data: {
       title: data.title,
       messages: data.messages,
       createdAt: now,
-      updatedAt: now,
-      sortKey: now
+      updatedAt: data.updatedAt || now,
+      sortKey: now,
+      status: data.status,
+      progress: data.progress,
+      metadata: data.metadata
     }
 
     await docClient.send(new PutCommand({
@@ -186,6 +219,23 @@ export async function updateConversation(data: {
   conversationId: string
   title?: string
   messages?: any[]
+  status?: 'processing' | 'completed' | 'error'
+  progress?: number
+  audioSegments?: Array<{
+    character: string
+    audioKey: string
+    startTime: number
+    endTime: number
+  }>
+  metadata?: {
+    totalDuration?: number
+    speakers?: string[]
+    turnCount?: number
+    createdAt?: number
+    genre?: string
+    title?: string
+    description?: string
+  }
 }) {
   try {
     console.log('[DynamoDB] Updating conversation:', data)
