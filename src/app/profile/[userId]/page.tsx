@@ -1,14 +1,18 @@
+'use client'
+
 import { Suspense } from 'react'
 import ProfileClient from './ProfileClient'
+import { useParams } from 'next/navigation'
 
-export default function ProfilePage({ params }: { params: { userId: string } }) {
+export default function ProfilePage() {
+  const params = useParams()
+  const userId = params?.userId as string
+
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    }>
-      <ProfileClient userId={params.userId} />
+    <Suspense fallback={<div>
+      Loading profile...
+    </div>}>
+      <ProfileClient userId={userId} />
     </Suspense>
   )
 }
