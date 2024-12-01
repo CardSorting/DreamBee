@@ -52,15 +52,16 @@ export async function POST(request: NextRequest) {
     const data = await request.json()
     const { title, description, genre, hashtags, audioUrl, dialogue, metadata } = data
 
-    // Create new published dialogue
+    // Create dialogue ID that will be shared between user and public entries
     const dialogueId = `dialogue_${Date.now()}`
-    const publishedDialogue: PublishedDialogue = {
-      pk: `USER#${userId}`,
-      sk: `DIALOGUE#${dialogueId}`,
-      type: 'PUBLISHED_DIALOGUE',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      sortKey: Date.now().toString(),
+    const timestamp = new Date().toISOString()
+    const sortKeyTimestamp = Date.now().toString()
+
+    // Base dialogue object
+    const baseDialogue = {
+      type: 'PUBLISHED_DIALOGUE' as const,
+      createdAt: timestamp,
+      updatedAt: timestamp,
       userId,
       dialogueId,
       title,
@@ -80,15 +81,35 @@ export async function POST(request: NextRequest) {
       dialogue
     }
 
-    // Save to DynamoDB
-    const params = {
-      TableName: 'PublishedDialogues',
-      Item: publishedDialogue
+    // Create user's feed entry
+    const userFeedEntry: PublishedDialogue = {
+      ...baseDialogue,
+      pk: `USER#${userId}`,
+      sk: `DIALOGUE#${dialogueId}`,
+      sortKey: sortKeyTimestamp
     }
 
-    await docClient.send(new PutCommand(params))
+    // Create public genre feed entry
+    const publicFeedEntry: PublishedDialogue = {
+      ...baseDialogue,
+      pk: `GENRE#${genre}`,
+      sk: `DIALOGUE#${dialogueId}`,
+      sortKey: sortKeyTimestamp
+    }
 
-    return NextResponse.json(publishedDialogue)
+    // Save both entries to DynamoDB
+    await Promise.all([
+      docClient.send(new PutCommand({
+        TableName: 'PublishedDialogues',
+        Item: userFeedEntry
+      })),
+      docClient.send(new PutCommand({
+        TableName: 'PublishedDialogues',
+        Item: publicFeedEntry
+      }))
+    ])
+
+    return NextResponse.json(userFeedEntry)
   } catch (error) {
     console.error('Error publishing dialogue:', error)
     return new NextResponse('Internal Server Error', { status: 500 })

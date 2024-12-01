@@ -146,7 +146,7 @@ export default function ManualDialogueCreator({
       setIsPublishing(true)
       setError(null)
 
-      const response = await fetch('/api/feed/publish', {
+      const response = await fetch('/api/feed', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -156,8 +156,13 @@ export default function ManualDialogueCreator({
           description,
           genre,
           hashtags,
+          audioUrl: result.audioUrls[0]?.url, // Use the first audio URL
           dialogue,
-          metadata: result.metadata
+          metadata: {
+            ...result.metadata,
+            audioUrls: result.audioUrls,
+            transcript: result.transcript
+          }
         }),
       })
 
