@@ -28,6 +28,8 @@ export default function RootLayout({
               card: 'bg-white shadow-lg rounded-lg',
             }
           }}
+          publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+          telemetry={false}
         >
           <div className="min-h-screen flex flex-col">
             <UserDataSync />

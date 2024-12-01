@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import UserNav from '../components/UserNav'
 
 export default function DashboardLayout({
   children,
@@ -16,7 +15,7 @@ export default function DashboardLayout({
       {/* Header */}
       <header className="h-16 bg-white border-b flex items-center justify-between px-4">
         <div className="flex items-center gap-8">
-          <div className="text-xl font-semibold text-gray-800">Dashboard</div>
+          <div className="text-xl font-semibold text-gray-800"></div>
           <nav className="flex gap-4">
             <Link 
               href="/dashboard" 
@@ -50,7 +49,6 @@ export default function DashboardLayout({
             </Link>
           </nav>
         </div>
-        <UserNav />
       </header>
 
       {/* Main Content */}

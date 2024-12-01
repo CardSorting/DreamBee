@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { PREDEFINED_VOICES, CharacterVoice } from '../../utils/voice-config'
 import { getAudioMerger, AudioSegmentInfo } from '../../utils/audio-merger'
 import { DialogueSession } from '../../utils/dynamodb/types'
+import { DIALOGUE_GENRES, DialogueGenre } from '../../utils/dynamodb/types/published-dialogue'
 
 interface DialogueTurn {
   character: string
@@ -48,9 +49,13 @@ export default function ManualDialogueCreator({
 }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [genre, setGenre] = useState<DialogueGenre>('Comedy')
+  const [hashtags, setHashtags] = useState<string[]>([])
+  const [hashtagInput, setHashtagInput] = useState('')
   const [characters, setCharacters] = useState<CharacterVoice[]>([defaultCharacter])
   const [dialogue, setDialogue] = useState<DialogueTurn[]>([{ character: defaultCharacter.customName, text: '' }])
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isPublishing, setIsPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
   const [mergedAudioUrl, setMergedAudioUrl] = useState<string | null>(null)
@@ -64,6 +69,17 @@ export default function ManualDialogueCreator({
       }
     }
   }, [mergedAudioUrl])
+
+  const addHashtag = () => {
+    if (hashtagInput.trim() && !hashtags.includes(hashtagInput.trim())) {
+      setHashtags([...hashtags, hashtagInput.trim()])
+      setHashtagInput('')
+    }
+  }
+
+  const removeHashtag = (tag: string) => {
+    setHashtags(hashtags.filter(t => t !== tag))
+  }
 
   const addCharacter = () => {
     const newCharacter: CharacterVoice = {
@@ -202,6 +218,45 @@ export default function ManualDialogueCreator({
     }
   }
 
+  const publishDialogue = async () => {
+    if (!result || !mergedAudioUrl) {
+      setError('Please generate the dialogue first')
+      return
+    }
+
+    try {
+      setIsPublishing(true)
+      setError(null)
+
+      const response = await fetch('/api/feed/publish', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          description,
+          genre,
+          hashtags,
+          audioUrl: mergedAudioUrl,
+          dialogue,
+          metadata: result.metadata
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to publish dialogue')
+      }
+
+      // Redirect to feed page after successful publish
+      window.location.href = '/dashboard/feed'
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to publish dialogue')
+    } finally {
+      setIsPublishing(false)
+    }
+  }
+
   return (
     <div className="space-y-8">
       {/* Title and Description */}
@@ -230,6 +285,65 @@ export default function ManualDialogueCreator({
             className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors h-24 resize-none"
             placeholder="Enter dialogue description"
           />
+        </div>
+        <div>
+          <label htmlFor="genre" className="block text-sm font-medium text-gray-700 mb-2">
+            Genre
+          </label>
+          <select
+            id="genre"
+            value={genre}
+            onChange={(e) => setGenre(e.target.value as DialogueGenre)}
+            className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          >
+            {DIALOGUE_GENRES.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="hashtags" className="block text-sm font-medium text-gray-700 mb-2">
+            Hashtags
+          </label>
+          <div className="flex gap-2 mb-2 flex-wrap">
+            {hashtags.map((tag) => (
+              <span
+                key={tag}
+                className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm flex items-center gap-1"
+              >
+                #{tag}
+                <button
+                  onClick={() => removeHashtag(tag)}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={hashtagInput}
+              onChange={(e) => setHashtagInput(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addHashtag()
+                }
+              }}
+              className="flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              placeholder="Add hashtag"
+            />
+            <button
+              onClick={addHashtag}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Add
+            </button>
+          </div>
         </div>
       </div>
 
@@ -347,24 +461,45 @@ export default function ManualDialogueCreator({
         </div>
       </div>
 
-      {/* Generate Button */}
-      <button
-        onClick={generateDialogue}
-        disabled={isGenerating || !title || !description || dialogue.some(turn => !turn.text)}
-        className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
-      >
-        {isGenerating ? (
-          <span className="flex items-center justify-center gap-2">
-            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            Generating...
-          </span>
-        ) : (
-          'Generate'
+      {/* Action Buttons */}
+      <div className="flex gap-4">
+        <button
+          onClick={generateDialogue}
+          disabled={isGenerating || !title || !description || dialogue.some(turn => !turn.text)}
+          className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+        >
+          {isGenerating ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Generating...
+            </span>
+          ) : (
+            'Generate'
+          )}
+        </button>
+        {result && (
+          <button
+            onClick={publishDialogue}
+            disabled={isPublishing || !genre || hashtags.length === 0}
+            className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          >
+            {isPublishing ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Publishing...
+              </span>
+            ) : (
+              'Publish'
+            )}
+          </button>
         )}
-      </button>
+      </div>
 
       {/* Error Display */}
       {error && (

@@ -1,59 +1,71 @@
-'use client';
+'use client'
 
-import { SignInButton, SignOutButton, useAuth } from "@clerk/nextjs";
-import Link from "next/link";
+import { UserButton, useAuth } from '@clerk/nextjs'
+import Link from 'next/link'
+import { MainNav } from './MainNav'
+import { AdminNavWrapper } from './AdminNavWrapper'
+import { useEffect, useState } from 'react'
 
 export default function Header() {
-  const { isLoaded, userId } = useAuth();
+  const { isLoaded, userId } = useAuth()
+  const [isAdmin, setIsAdmin] = useState(false)
 
-  // Show loading state
-  if (!isLoaded) {
-    return (
-      <header className="w-full bg-black/50 backdrop-blur-md border-b border-white/10">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-16">
-            <Link href="/" className="text-xl font-bold text-white">
-              DreamBee
-            </Link>
-            <div className="w-24 h-8 bg-white/10 rounded-full animate-pulse" />
-          </div>
-        </div>
-      </header>
-    );
-  }
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!userId) {
+        setIsAdmin(false)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/user/role?userId=${userId}`)
+        const data = await response.json()
+        setIsAdmin(data.isAdmin || false)
+      } catch (error) {
+        console.error('Error checking admin status:', error)
+        setIsAdmin(false)
+      }
+    }
+
+    if (isLoaded && userId) {
+      checkAdminStatus()
+    }
+  }, [isLoaded, userId])
 
   return (
-    <header className="w-full bg-black/50 backdrop-blur-md border-b border-white/10">
-      <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
-          <Link href="/" className="text-xl font-bold text-white">
-            DreamBee
-          </Link>
-          <div className="flex items-center gap-4">
-            {userId ? (
-              <>
-                <Link 
-                  href="/dashboard" 
-                  className="text-gray-300 hover:text-white transition"
-                >
-                  Dashboard
-                </Link>
-                <SignOutButton>
-                  <button className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full font-semibold text-white hover:opacity-90 transition">
-                    Sign Out
-                  </button>
-                </SignOutButton>
-              </>
-            ) : (
-              <SignInButton>
-                <button className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full font-semibold text-white hover:opacity-90 transition">
-                  Sign In
-                </button>
-              </SignInButton>
-            )}
+    <div className="bg-white">
+      {/* Main Header */}
+      <div className="border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center space-x-8">
+              <Link 
+                href="/" 
+                className="flex items-center space-x-3"
+              >
+                <span className="text-xl font-bold text-gray-900">DreamBee</span>
+              </Link>
+              <MainNav isAdmin={isAdmin} />
+            </div>
+            <div className="flex items-center space-x-4">
+              <UserButton
+                afterSignOutUrl="/"
+                appearance={{
+                  elements: {
+                    avatarBox: "w-8 h-8",
+                    userButtonBox: "w-8 h-8"
+                  }
+                }}
+                userProfileMode="navigation"
+                userProfileUrl={`/profile/${process.env.NEXT_PUBLIC_CLERK_USER_TAG || '@user'}`}
+              />
+            </div>
           </div>
         </div>
       </div>
-    </header>
-  );
+
+      {/* Admin Sub-Navigation */}
+      <AdminNavWrapper isAdmin={isAdmin} />
+    </div>
+  )
 }
