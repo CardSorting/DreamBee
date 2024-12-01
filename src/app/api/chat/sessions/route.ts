@@ -4,46 +4,86 @@ import { getConversationMetadata, getConversationDetails } from '../../../../uti
 
 export async function GET(request: NextRequest) {
   try {
-    const authData = await auth()
-    const userId = authData.userId
-    if (!userId) {
-      console.error('[Chat Sessions API] No user found')
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await auth()
+    if (!session?.userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
     }
 
     try {
-      const { conversations } = await getConversationMetadata(userId)
-      const sessions = await Promise.all(
-        conversations.map(async (conv) => {
-          const details = await getConversationDetails(userId, conv.conversationId)
+      const { conversations } = await getConversationMetadata(session.userId)
+      
+      // Get full details for each conversation
+      const sessionsPromises = conversations.map(async (conv) => {
+        try {
+          const details = await getConversationDetails(session.userId, conv.conversationId)
           if (!details) return null
+          
           return {
             id: details.conversationId,
             title: details.title,
-            messages: details.messages,
+            messages: details.messages || [],
             createdAt: details.createdAt,
             updatedAt: details.updatedAt
           }
-        })
-      )
+        } catch (error) {
+          console.error(`Error fetching details for conversation ${conv.conversationId}:`, error)
+          return null
+        }
+      })
 
-      const validSessions = sessions.filter(s => s !== null)
+      const sessions = await Promise.all(sessionsPromises)
+      const validSessions = sessions.filter((s): s is NonNullable<typeof s> => s !== null)
+
       return NextResponse.json(validSessions)
     } catch (dbError) {
       console.error('[Chat Sessions API] Database error:', dbError)
       if (dbError instanceof Error && dbError.message.includes('security token')) {
-        return new NextResponse('AWS credentials not configured', { status: 503 })
+        return NextResponse.json(
+          { error: 'Database configuration error' },
+          { status: 503 }
+        )
       }
       throw dbError
     }
   } catch (error) {
     console.error('[Chat Sessions API] Error:', error)
-    if (error instanceof Error) {
-      console.error('[Chat Sessions API] Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const session = await auth()
+    if (!session?.userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
     }
-    return new NextResponse('Internal Server Error', { status: 500 })
+
+    const body = await request.json()
+    const { title = 'New Chat' } = body
+
+    // Create new conversation logic would go here
+    // For now, return a mock response
+    return NextResponse.json({
+      id: crypto.randomUUID(),
+      title,
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+  } catch (error) {
+    console.error('[Chat Sessions API] Error creating session:', error)
+    return NextResponse.json(
+      { error: 'Failed to create chat session' },
+      { status: 500 }
+    )
   }
 }

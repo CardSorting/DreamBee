@@ -10,20 +10,38 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const authData = await auth()
-    const userId = authData.userId
-    if (!userId) {
-      console.error('[Chat Messages API] No user found')
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await auth()
+    if (!session?.userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    // Ensure params.id is available
+    if (!params?.id) {
+      return NextResponse.json(
+        { error: 'Session ID is required' },
+        { status: 400 }
+      )
     }
 
     try {
-      const session = await getConversationDetails(userId, params.id)
-      if (!session) {
-        return new NextResponse('Session not found', { status: 404 })
+      const conversation = await getConversationDetails(session.userId, params.id)
+      if (!conversation) {
+        return NextResponse.json(
+          { error: 'Session not found' },
+          { status: 404 }
+        )
       }
 
       const { role, content } = await request.json()
+      if (!role || !content) {
+        return NextResponse.json(
+          { error: 'Message role and content are required' },
+          { status: 400 }
+        )
+      }
       
       const message = {
         role,
@@ -31,41 +49,45 @@ export async function POST(
         timestamp: new Date().toISOString()
       }
 
-      const updatedMessages = [...session.messages, message]
+      const updatedMessages = [...(conversation.messages || []), message]
 
-      const updatedSession = await updateConversation({
-        userId,
+      const updatedConversation = await updateConversation({
+        userId: session.userId,
         conversationId: params.id,
-        title: session.title,
+        title: conversation.title,
         messages: updatedMessages
       })
 
-      if (!updatedSession) {
-        return new NextResponse('Failed to update session', { status: 500 })
+      if (!updatedConversation) {
+        return NextResponse.json(
+          { error: 'Failed to update session' },
+          { status: 500 }
+        )
       }
 
+      // Transform to match ChatSession interface
       return NextResponse.json({
-        id: updatedSession.conversationId,
-        title: updatedSession.title,
-        messages: updatedSession.messages,
-        createdAt: updatedSession.createdAt,
-        updatedAt: updatedSession.updatedAt
+        id: updatedConversation.conversationId,
+        title: updatedConversation.title,
+        messages: updatedConversation.messages || [],
+        createdAt: updatedConversation.createdAt,
+        updatedAt: updatedConversation.updatedAt
       })
     } catch (dbError) {
       console.error('[Chat Messages API] Database error:', dbError)
       if (dbError instanceof Error && dbError.message.includes('security token')) {
-        return new NextResponse('AWS credentials not configured', { status: 503 })
+        return NextResponse.json(
+          { error: 'Database configuration error' },
+          { status: 503 }
+        )
       }
       throw dbError
     }
   } catch (error) {
     console.error('[Chat Messages API] Error:', error)
-    if (error instanceof Error) {
-      console.error('[Chat Messages API] Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
-    }
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
   }
 }

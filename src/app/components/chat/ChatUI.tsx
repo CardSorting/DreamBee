@@ -118,7 +118,7 @@ export const ChatUI = () => {
               History
             </button>
             <div className={chatStyles.main.messageCount}>
-              {currentSession?.messages.length || 0} messages
+              {currentSession?.messages?.length || 0} messages
             </div>
           </div>
         )}
@@ -128,7 +128,7 @@ export const ChatUI = () => {
             <div className="flex items-center justify-center h-full">
               <div className="text-gray-500">Loading your chats...</div>
             </div>
-          ) : !currentSession ? (
+          ) : !currentSession || !currentSession.messages ? (
             <EmptyState onNewChat={handleNewSession} />
           ) : (
             <div className={chatStyles.main.messagesArea}>
