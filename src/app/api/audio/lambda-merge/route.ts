@@ -115,25 +115,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!result.body?.audioData) {
-      console.error('Lambda response missing audio data:', result)
+    // Handle different response types
+    if (result.body.url) {
+      // Large file case - return the S3 URL
+      return NextResponse.json({
+        url: result.body.url,
+        format: result.body.format,
+        size: result.body.size,
+        isLarge: result.body.isLarge || false,
+        progress: result.body.progress
+      })
+    } else if (result.body.audioData) {
+      // Small file case - return the audio data directly
+      const audioData = Buffer.from(result.body.audioData, 'base64')
+      return new NextResponse(audioData, {
+        headers: {
+          'Content-Type': `audio/${result.body.format}`,
+          'Content-Length': audioData.length.toString(),
+          'Cache-Control': 'no-cache'
+        }
+      })
+    } else {
+      console.error('Invalid Lambda response format:', result)
       return NextResponse.json(
-        { error: 'No audio data in Lambda response' },
+        { error: 'Invalid response format from Lambda' },
         { status: 500 }
       )
     }
-
-    // Convert the base64 audio data to a buffer
-    const audioData = Buffer.from(result.body.audioData, 'base64')
-    
-    // Return the audio data with appropriate headers
-    return new NextResponse(audioData, {
-      headers: {
-        'Content-Type': 'audio/wav',
-        'Content-Length': audioData.length.toString(),
-        'Cache-Control': 'no-cache'
-      }
-    })
 
   } catch (err) {
     const error = err as Error

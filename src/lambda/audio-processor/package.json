@@ -4,6 +4,8 @@
   "description": "AWS Lambda function for audio processing with FFmpeg",
   "main": "index.js",
   "dependencies": {
+    "@upstash/redis": "^1.28.0",
+    "aws-sdk": "^2.1502.0",
     "dotenv": "^16.3.1"
   },
   "scripts": {

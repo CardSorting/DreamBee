@@ -1,8 +1,17 @@
 import { AudioSegmentInfo } from './audio-merger'
 
 export interface LambdaProcessingResult {
-  url: string
-  duration: number
+  url?: string
+  format?: string
+  size?: number
+  isLarge?: boolean
+  progress?: {
+    totalSegments: number
+    processedSegments: number
+    currentPhase: string
+    details: string
+    mergeProgress: number
+  }
 }
 
 export class LambdaProcessingError extends Error {
@@ -14,6 +23,21 @@ export class LambdaProcessingError extends Error {
     super(message)
     this.name = 'LambdaProcessingError'
   }
+}
+
+async function fetchAudioFromUrl(url: string): Promise<Blob> {
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new LambdaProcessingError(
+      `Failed to fetch audio from S3: ${response.statusText}`,
+      response.status
+    )
+  }
+  const blob = await response.blob()
+  if (!blob || blob.size === 0) {
+    throw new LambdaProcessingError('Received empty audio data from S3')
+  }
+  return blob
 }
 
 export async function processAudioWithLambda(segments: AudioSegmentInfo[]): Promise<Blob> {
@@ -43,12 +67,26 @@ export async function processAudioWithLambda(segments: AudioSegmentInfo[]): Prom
       )
     }
 
-    const blob = await response.blob()
-    if (!blob || blob.size === 0) {
-      throw new LambdaProcessingError('Received empty audio data from Lambda')
-    }
+    // Check if response is JSON (for S3 URL) or blob (for direct audio)
+    const contentType = response.headers.get('content-type')
+    if (contentType?.includes('application/json')) {
+      const result: LambdaProcessingResult = await response.json()
+      
+      if (!result.url) {
+        throw new LambdaProcessingError('No audio URL in response')
+      }
 
-    return blob
+      // Fetch audio from S3
+      console.log('Fetching large audio file from S3...')
+      return await fetchAudioFromUrl(result.url)
+    } else {
+      // Direct blob response
+      const blob = await response.blob()
+      if (!blob || blob.size === 0) {
+        throw new LambdaProcessingError('Received empty audio data from Lambda')
+      }
+      return blob
+    }
   } catch (error) {
     if (error instanceof LambdaProcessingError) {
       throw error
