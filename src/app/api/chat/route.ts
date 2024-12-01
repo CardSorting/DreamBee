@@ -1,14 +1,14 @@
-import { Anthropic } from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from "@google/generative-ai"
 import { NextResponse } from 'next/server'
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || ''
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '')
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-1.5-flash",
+  generationConfig: {
+    maxOutputTokens: 1024,
+    temperature: 0.7,
+  }
 })
-
-interface ContentBlock {
-  type: 'text'
-  text: string
-}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -32,8 +32,8 @@ export async function POST(request: Request) {
     const recentMessages = messages.slice(-10)
     console.log('Using recent messages:', recentMessages)
 
-    // Convert messages to Anthropic format
-    const anthropicMessages = recentMessages.map((msg: Message) => {
+    // Convert messages to Gemini format
+    const geminiMessages = recentMessages.map((msg: Message) => {
       if (!msg.role || !msg.content || !['user', 'assistant'].includes(msg.role)) {
         console.error('Invalid message format:', msg)
         throw new Error(`Invalid message format: ${JSON.stringify(msg)}`)
@@ -41,82 +41,64 @@ export async function POST(request: Request) {
 
       return {
         role: msg.role,
-        content: msg.content
+        parts: [{ text: msg.content }]
       }
     })
 
     // Log formatted messages
-    console.log('Formatted messages for Anthropic:', anthropicMessages)
+    console.log('Formatted messages for Gemini:', geminiMessages)
 
     // Ensure there's at least one message
-    if (anthropicMessages.length === 0) {
+    if (geminiMessages.length === 0) {
       throw new Error('No valid messages provided')
     }
 
+    // Start a chat
+    const chat = model.startChat({
+      history: geminiMessages.slice(0, -1), // All messages except the last one
+      generationConfig: {
+        maxOutputTokens: 1024,
+        temperature: 0.7,
+      }
+    })
+
+    const lastMessage = geminiMessages[geminiMessages.length - 1]
+
     if (!stream) {
       // For non-streaming responses
-      console.log('Making non-streaming request to Anthropic')
-      const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 1024,
-        temperature: 0.7,
-        messages: anthropicMessages,
-        system: "You are a helpful AI assistant. Provide clear, accurate, and engaging responses."
-      })
+      console.log('Making non-streaming request to Gemini')
+      const result = await chat.sendMessage(lastMessage.parts[0].text)
+      const response = result.response.text()
 
-      // Log full response for debugging
-      console.log('Full Anthropic response:', JSON.stringify(response, null, 2))
+      console.log('Extracted text content:', response)
 
-      // Extract text content from response blocks
-      const textContent = response.content
-        .filter((block): block is { type: 'text'; text: string } => 
-          block.type === 'text' && typeof block.text === 'string'
-        )
-        .map(block => block.text)
-        .join('\n')
-
-      console.log('Extracted text content:', textContent)
-
-      if (!textContent) {
-        console.error('No text content found in response:', response)
+      if (!response) {
+        console.error('No text content found in response')
         throw new Error('No text content in response')
       }
 
       // Log final response
-      console.log('Sending response:', { contentLength: textContent.length, content: textContent })
+      console.log('Sending response:', { contentLength: response.length, content: response })
 
-      return NextResponse.json({ content: textContent })
+      return NextResponse.json({ content: response })
     } else {
       // For streaming responses
-      console.log('Making streaming request to Anthropic')
-      const stream = await anthropic.messages.create({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 1024,
-        temperature: 0.7,
-        messages: anthropicMessages,
-        system: "You are a helpful AI assistant. Provide clear, accurate, and engaging responses.",
-        stream: true
-      })
+      console.log('Making streaming request to Gemini')
+      const result = await chat.sendMessageStream(lastMessage.parts[0].text)
 
       const encoder = new TextEncoder()
       const customReadable = new ReadableStream({
         async start(controller) {
           try {
             let chunkCount = 0
-            for await (const chunk of stream) {
-              console.log('Stream chunk:', JSON.stringify(chunk, null, 2))
+            for await (const chunk of result.stream) {
+              const chunkText = chunk.text()
+              console.log('Stream chunk:', chunkText)
               
-              if (chunk.type === 'message_delta' && chunk.delta) {
-                const deltaContent = 'content' in chunk.delta ? chunk.delta.content : null
-                if (Array.isArray(deltaContent)) {
-                  deltaContent.forEach(block => {
-                    if ('type' in block && block.type === 'text' && 'text' in block) {
-                      const eventData = `data: ${JSON.stringify({ content: block.text })}\n\n`
-                      controller.enqueue(encoder.encode(eventData))
-                      chunkCount++
-                    }
-                  })
-                }
+              if (chunkText) {
+                const eventData = `data: ${JSON.stringify({ content: chunkText })}\n\n`
+                controller.enqueue(encoder.encode(eventData))
+                chunkCount++
               }
             }
             console.log(`Streaming completed. Sent ${chunkCount} chunks`)
