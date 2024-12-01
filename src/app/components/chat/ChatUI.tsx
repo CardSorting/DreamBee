@@ -23,12 +23,14 @@ export const ChatUI = () => {
     isLoadingSessions,
     isLoaded,
     isSignedIn,
+    isExporting,
     setMessage,
     setError,
     setIsSidebarOpen,
     handleNewSession,
     handleSelectSession,
     handleSendMessage,
+    handleExport,
     getUserInitials,
   } = useChatController()
 
@@ -109,19 +111,36 @@ export const ChatUI = () => {
       />
 
       <main className={chatStyles.main.container}>
-        {isMobile && (
-          <div className={chatStyles.main.mobileHeader}>
+        {/* Header with Export Button */}
+        <div className="flex justify-between items-center p-4 border-b">
+          {isMobile ? (
             <button
               onClick={() => setIsSidebarOpen(true)}
               className={chatStyles.main.historyButton}
             >
               History
             </button>
+          ) : (
             <div className={chatStyles.main.messageCount}>
               {currentSession?.messages?.length || 0} messages
             </div>
-          </div>
-        )}
+          )}
+          
+          {currentSession && currentSession.messages.length > 0 && (
+            <button
+              onClick={handleExport}
+              disabled={isExporting}
+              className={`
+                px-3 py-1 rounded-lg text-sm font-medium transition-colors
+                ${isExporting 
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}
+              `}
+            >
+              {isExporting ? 'Exporting...' : 'Export to Dialogue'}
+            </button>
+          )}
+        </div>
 
         <div className={chatStyles.main.messagesContainer}>
           {isLoadingSessions ? (

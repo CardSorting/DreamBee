@@ -9,15 +9,16 @@ export interface CharacterVoice {
   gender: 'male' | 'female'
 }
 
+// Using actual ElevenLabs voice IDs
 export const PREDEFINED_VOICES = {
   male: [
-    { id: 'adam', name: 'Adam' },
-    { id: 'josh', name: 'Josh' },
-    { id: 'michael', name: 'Michael' }
+    { id: 'ErXwobaYiN019PkySvjV', name: 'Adam' },  // Antoni
+    { id: 'VR6AewLTigWG4xSOukaG', name: 'Josh' },  // Arnold
+    { id: 'pNInz6obpgDQGcFmaJgB', name: 'Michael' }  // Josh
   ],
   female: [
-    { id: 'sarah', name: 'Sarah' },
-    { id: 'emily', name: 'Emily' },
-    { id: 'rachel', name: 'Rachel' }
+    { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah' },  // Rachel
+    { id: '21m00Tcm4TlvDq8ikWAM', name: 'Emily' },  // Belle
+    { id: 'zrHiDhphv9ZnVXBqCLjz', name: 'Rachel' }  // Dorothy
   ]
 } as const;

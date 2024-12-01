@@ -1,12 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { PREDEFINED_VOICES, CharacterVoice } from '../../utils/voice-config'
-import { getAudioMerger, AudioSegmentInfo } from '../../utils/audio-merger'
+import { CharacterVoice } from '../../utils/voice-config'
+import { DialogueGenre } from '../../utils/dynamodb/types/published-dialogue'
 import { DialogueSession } from '../../utils/dynamodb/types'
-import { DIALOGUE_GENRES, DialogueGenre } from '../../utils/dynamodb/types/published-dialogue'
+import { MetadataEditor } from './dialogue/MetadataEditor'
+import { CharacterManager } from './dialogue/CharacterManager'
+import { DialogueManager } from './dialogue/DialogueManager'
+import { AudioPreview } from './dialogue/AudioPreview'
+import { GenerationControls } from './dialogue/GenerationControls'
 
-interface DialogueTurn {
+export interface DialogueTurn {
   character: string
   text: string
 }
@@ -34,42 +38,46 @@ interface GenerationResult {
 // Default character configuration
 const defaultCharacter: CharacterVoice = {
   customName: 'Adam',
-  voiceId: PREDEFINED_VOICES.male[0].id,
+  voiceId: 'ErXwobaYiN019PkySvjV', // Antoni voice
   gender: 'male'
+}
+
+interface InitialData {
+  title?: string
+  description?: string
+  dialogue?: DialogueTurn[]
+  characters?: CharacterVoice[]
 }
 
 export default function ManualDialogueCreator({
   onGenerationComplete,
   dialogueId,
-  onSessionUpdate
+  onSessionUpdate,
+  initialData
 }: {
   onGenerationComplete?: (result: GenerationResult) => void
   dialogueId?: string
   onSessionUpdate?: (sessions: DialogueSession[]) => void
+  initialData?: InitialData
 }) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
+  // State
+  const [title, setTitle] = useState(initialData?.title || '')
+  const [description, setDescription] = useState(initialData?.description || '')
   const [genre, setGenre] = useState<DialogueGenre>('Comedy')
   const [hashtags, setHashtags] = useState<string[]>([])
   const [hashtagInput, setHashtagInput] = useState('')
-  const [characters, setCharacters] = useState<CharacterVoice[]>([defaultCharacter])
-  const [dialogue, setDialogue] = useState<DialogueTurn[]>([{ character: defaultCharacter.customName, text: '' }])
+  const [characters, setCharacters] = useState<CharacterVoice[]>(
+    initialData?.characters || [defaultCharacter]
+  )
+  const [dialogue, setDialogue] = useState<DialogueTurn[]>(
+    initialData?.dialogue || [{ character: defaultCharacter.customName, text: '' }]
+  )
   const [isGenerating, setIsGenerating] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
-  const [mergedAudioUrl, setMergedAudioUrl] = useState<string | null>(null)
-  const [isMergingAudio, setIsMergingAudio] = useState(false)
 
-  useEffect(() => {
-    // Cleanup function to revoke object URLs
-    return () => {
-      if (mergedAudioUrl) {
-        URL.revokeObjectURL(mergedAudioUrl)
-      }
-    }
-  }, [mergedAudioUrl])
-
+  // Hashtag handlers
   const addHashtag = () => {
     if (hashtagInput.trim() && !hashtags.includes(hashtagInput.trim())) {
       setHashtags([...hashtags, hashtagInput.trim()])
@@ -81,98 +89,11 @@ export default function ManualDialogueCreator({
     setHashtags(hashtags.filter(t => t !== tag))
   }
 
-  const addCharacter = () => {
-    const newCharacter: CharacterVoice = {
-      customName: `Character ${characters.length + 1}`,
-      voiceId: PREDEFINED_VOICES.male[0].id,
-      gender: 'male'
-    }
-    setCharacters([...characters, newCharacter])
-  }
-
-  const updateCharacter = (index: number, updates: Partial<CharacterVoice>) => {
-    const newCharacters = [...characters]
-    newCharacters[index] = { ...newCharacters[index], ...updates }
-    
-    // If changing gender, update voiceId to first voice of that gender
-    if (updates.gender) {
-      newCharacters[index].voiceId = PREDEFINED_VOICES[updates.gender][0].id
-    }
-    
-    setCharacters(newCharacters)
-
-    // Update dialogue turns that use this character
-    const oldName = characters[index].customName
-    const newName = updates.customName || oldName
-    if (newName !== oldName) {
-      setDialogue(dialogue.map(turn => ({
-        ...turn,
-        character: turn.character === oldName ? newName : turn.character
-      })))
-    }
-  }
-
-  const removeCharacter = (index: number) => {
-    // Don't remove if it's the last character
-    if (characters.length <= 1) return
-
-    const newCharacters = characters.filter((_, i) => i !== index)
-    setCharacters(newCharacters)
-    
-    // Update dialogue to remove turns with deleted character
-    const character = characters[index]
-    const newDialogue = dialogue.filter(turn => turn.character !== character.customName)
-    setDialogue(newDialogue)
-  }
-
-  const addDialogueTurn = () => {
-    setDialogue([...dialogue, { character: characters[0].customName, text: '' }])
-  }
-
-  const updateDialogueTurn = (index: number, field: keyof DialogueTurn, value: string) => {
-    const newDialogue = [...dialogue]
-    newDialogue[index] = { ...newDialogue[index], [field]: value }
-    setDialogue(newDialogue)
-  }
-
-  const removeDialogueTurn = (index: number) => {
-    const newDialogue = dialogue.filter((_, i) => i !== index)
-    setDialogue(newDialogue)
-  }
-
-  const mergeAudioSegments = async (result: GenerationResult) => {
-    setIsMergingAudio(true)
-    try {
-      const segments: AudioSegmentInfo[] = result.audioUrls.map((audio, index) => ({
-        url: audio.url,
-        startTime: result.transcript.json.segments[index].startTime,
-        endTime: result.transcript.json.segments[index].endTime,
-        character: audio.character,
-        previousCharacter: index > 0 ? result.audioUrls[index - 1].character : undefined
-      }))
-
-      const audioMerger = getAudioMerger()
-      const mergedBlob = await audioMerger.mergeAudioSegments(segments)
-      
-      // Create URL for the merged audio
-      if (mergedAudioUrl) {
-        URL.revokeObjectURL(mergedAudioUrl)
-      }
-      const newUrl = URL.createObjectURL(mergedBlob)
-      setMergedAudioUrl(newUrl)
-    } catch (error) {
-      console.error('Error merging audio:', error)
-      setError('Failed to merge audio segments')
-    } finally {
-      setIsMergingAudio(false)
-    }
-  }
-
+  // Generation handlers
   const generateDialogue = async () => {
     try {
       setIsGenerating(true)
       setError(null)
-      setMergedAudioUrl(null)
 
       const response = await fetch('/api/manual-generate-dialogue', {
         method: 'POST',
@@ -193,9 +114,6 @@ export default function ManualDialogueCreator({
 
       const data = await response.json()
       setResult(data)
-      
-      // Merge audio segments
-      await mergeAudioSegments(data)
       
       if (onGenerationComplete) {
         onGenerationComplete(data)
@@ -219,7 +137,7 @@ export default function ManualDialogueCreator({
   }
 
   const publishDialogue = async () => {
-    if (!result || !mergedAudioUrl) {
+    if (!result) {
       setError('Please generate the dialogue first')
       return
     }
@@ -238,7 +156,6 @@ export default function ManualDialogueCreator({
           description,
           genre,
           hashtags,
-          audioUrl: mergedAudioUrl,
           dialogue,
           metadata: result.metadata
         }),
@@ -259,247 +176,47 @@ export default function ManualDialogueCreator({
 
   return (
     <div className="space-y-8">
-      {/* Title and Description */}
-      <div className="space-y-4">
-        <div>
-          <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
-            Title
-          </label>
-          <input
-            id="title"
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-            placeholder="Enter dialogue title"
-          />
-        </div>
-        <div>
-          <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
-            Description
-          </label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors h-24 resize-none"
-            placeholder="Enter dialogue description"
-          />
-        </div>
-        <div>
-          <label htmlFor="genre" className="block text-sm font-medium text-gray-700 mb-2">
-            Genre
-          </label>
-          <select
-            id="genre"
-            value={genre}
-            onChange={(e) => setGenre(e.target.value as DialogueGenre)}
-            className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-          >
-            {DIALOGUE_GENRES.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="hashtags" className="block text-sm font-medium text-gray-700 mb-2">
-            Hashtags
-          </label>
-          <div className="flex gap-2 mb-2 flex-wrap">
-            {hashtags.map((tag) => (
-              <span
-                key={tag}
-                className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm flex items-center gap-1"
-              >
-                #{tag}
-                <button
-                  onClick={() => removeHashtag(tag)}
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={hashtagInput}
-              onChange={(e) => setHashtagInput(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  addHashtag()
-                }
-              }}
-              className="flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              placeholder="Add hashtag"
-            />
-            <button
-              onClick={addHashtag}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* Metadata Section */}
+      <MetadataEditor
+        title={title}
+        description={description}
+        genre={genre}
+        hashtags={hashtags}
+        hashtagInput={hashtagInput}
+        onUpdateTitle={setTitle}
+        onUpdateDescription={setDescription}
+        onUpdateGenre={setGenre}
+        onUpdateHashtagInput={setHashtagInput}
+        onAddHashtag={addHashtag}
+        onRemoveHashtag={removeHashtag}
+      />
 
       {/* Characters Section */}
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-lg font-medium text-gray-900">Characters</h3>
-          <button
-            onClick={addCharacter}
-            className="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors text-sm"
-          >
-            Add Character
-          </button>
-        </div>
-        <div className="space-y-4">
-          {characters.map((character, index) => (
-            <div key={index} className="flex gap-4 items-start bg-gray-50 p-4 rounded-lg">
-              <div className="flex-1 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Character Name
-                  </label>
-                  <input
-                    type="text"
-                    value={character.customName}
-                    onChange={(e) => updateCharacter(index, { customName: e.target.value })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                    placeholder="Enter character name"
-                  />
-                </div>
-                <div className="flex gap-4">
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Gender
-                    </label>
-                    <select
-                      value={character.gender}
-                      onChange={(e) => updateCharacter(index, { gender: e.target.value as 'male' | 'female' })}
-                      className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                    >
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                    </select>
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Voice
-                    </label>
-                    <select
-                      value={character.voiceId}
-                      onChange={(e) => updateCharacter(index, { voiceId: e.target.value })}
-                      className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                    >
-                      {PREDEFINED_VOICES[character.gender].map((voice) => (
-                        <option key={voice.id} value={voice.id}>
-                          {voice.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-              {characters.length > 1 && (
-                <button
-                  onClick={() => removeCharacter(index)}
-                  className="px-3 py-2 text-red-600 hover:text-red-700 transition-colors"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      <CharacterManager
+        characters={characters}
+        onUpdateCharacters={setCharacters}
+      />
 
       {/* Dialogue Section */}
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-lg font-medium text-gray-900">Dialogue</h3>
-          <button
-            onClick={addDialogueTurn}
-            disabled={characters.length === 0}
-            className="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
-          >
-            Add Turn
-          </button>
-        </div>
-        <div className="space-y-4">
-          {dialogue.map((turn, index) => (
-            <div key={index} className="flex gap-4 items-start">
-              <select
-                value={turn.character}
-                onChange={(e) => updateDialogueTurn(index, 'character', e.target.value)}
-                className="w-1/4 px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              >
-                {characters.map((char, i) => (
-                  <option key={i} value={char.customName}>{char.customName}</option>
-                ))}
-              </select>
-              <textarea
-                value={turn.text}
-                onChange={(e) => updateDialogueTurn(index, 'text', e.target.value)}
-                className="flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors resize-none"
-                rows={2}
-                placeholder="Enter dialogue line"
-              />
-              <button
-                onClick={() => removeDialogueTurn(index)}
-                className="px-3 py-2 text-red-600 hover:text-red-700 transition-colors"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
+      <DialogueManager
+        dialogue={dialogue}
+        characters={characters}
+        onUpdateDialogue={setDialogue}
+      />
 
-      {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button
-          onClick={generateDialogue}
-          disabled={isGenerating || !title || !description || dialogue.some(turn => !turn.text)}
-          className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
-        >
-          {isGenerating ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Generating...
-            </span>
-          ) : (
-            'Generate'
-          )}
-        </button>
-        {result && (
-          <button
-            onClick={publishDialogue}
-            disabled={isPublishing || !genre || hashtags.length === 0}
-            className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
-          >
-            {isPublishing ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Publishing...
-              </span>
-            ) : (
-              'Publish'
-            )}
-          </button>
-        )}
-      </div>
+      {/* Generation Controls */}
+      <GenerationControls
+        title={title}
+        description={description}
+        dialogue={dialogue}
+        genre={genre}
+        hashtags={hashtags}
+        isGenerating={isGenerating}
+        isPublishing={isPublishing}
+        result={result}
+        onGenerate={generateDialogue}
+        onPublish={publishDialogue}
+      />
 
       {/* Error Display */}
       {error && (
@@ -519,54 +236,10 @@ export default function ManualDialogueCreator({
 
       {/* Result Display */}
       {result && (
-        <div className="bg-white rounded-lg border p-6 space-y-6">
-          <div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">{result.title}</h3>
-            <p className="text-gray-600">{result.description}</p>
-          </div>
-          
-          {/* Metadata */}
-          <div className="flex gap-6 py-4 border-t border-b">
-            <div>
-              <div className="text-sm text-gray-500">Duration</div>
-              <div className="font-medium">{Math.round(result.metadata.totalDuration)}s</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Speakers</div>
-              <div className="font-medium">{result.metadata.speakers.length}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Turns</div>
-              <div className="font-medium">{result.metadata.turnCount}</div>
-            </div>
-          </div>
-          
-          {/* Merged Audio Player */}
-          <div className="space-y-4">
-            <h4 className="font-medium text-gray-900">Audio Preview</h4>
-            {isMergingAudio ? (
-              <div className="flex items-center justify-center p-4 bg-gray-50 rounded-lg">
-                <svg className="animate-spin h-5 w-5 text-gray-500" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span className="ml-2 text-gray-600">Merging audio segments...</span>
-              </div>
-            ) : mergedAudioUrl ? (
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <audio
-                  controls
-                  src={mergedAudioUrl}
-                  className="w-full"
-                />
-              </div>
-            ) : (
-              <div className="p-4 bg-yellow-50 text-yellow-700 rounded-lg">
-                Failed to merge audio segments. Individual segments are still available.
-              </div>
-            )}
-          </div>
-        </div>
+        <AudioPreview
+          result={result}
+          onError={setError}
+        />
       )}
     </div>
   )

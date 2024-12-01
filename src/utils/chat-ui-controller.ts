@@ -3,8 +3,11 @@ import { useUser } from '@clerk/nextjs'
 import { ChatMessageHandler } from './chat-message-handler'
 import { chatService } from './chat-service'
 import type { ChatSession } from '../app/types/chat'
+import { useRouter } from 'next/navigation'
 
 export const useChatController = () => {
+  const router = useRouter()
+  
   // State
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -16,6 +19,7 @@ export const useChatController = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [isLoadingSessions, setIsLoadingSessions] = useState(true)
+  const [isExporting, setIsExporting] = useState(false)
   
   const messageHandlerRef = useRef<ChatMessageHandler | null>(null)
   const { isSignedIn, user, isLoaded } = useUser()
@@ -153,6 +157,60 @@ export const useChatController = () => {
     }
   }, [message, isLoading, currentSession, createNewSession, user])
 
+  // Export handling
+  const handleExport = useCallback(async () => {
+    if (!currentSession) {
+      console.error('No current session to export')
+      return
+    }
+
+    try {
+      setIsExporting(true)
+      setError(null)
+
+      console.log('Starting export with session:', currentSession)
+
+      const response = await fetch('/api/export-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(currentSession),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to export chat')
+      }
+
+      const data = await response.json()
+      console.log('Received exported data:', data)
+      
+      // Clear any existing data
+      localStorage.removeItem('exportedDialogue')
+      
+      // Store the exported data in localStorage
+      const serializedData = JSON.stringify(data)
+      localStorage.setItem('exportedDialogue', serializedData)
+      
+      // Verify the data was stored correctly
+      const storedData = localStorage.getItem('exportedDialogue')
+      console.log('Verified stored data:', storedData)
+      
+      if (!storedData) {
+        throw new Error('Failed to store exported data')
+      }
+      
+      // Navigate to manual dialogue creator
+      // Use replace instead of push to prevent going back to the chat
+      router.replace('/dashboard/manual-dialogue')
+    } catch (err) {
+      console.error('Export error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to export chat')
+    } finally {
+      setIsExporting(false)
+    }
+  }, [currentSession, router])
+
   // Handle responsive behavior
   useEffect(() => {
     const checkMobile = () => setIsSidebarOpen(window.innerWidth >= 1024)
@@ -175,6 +233,7 @@ export const useChatController = () => {
     isLoadingSessions,
     isLoaded,
     isSignedIn,
+    isExporting,
 
     // Actions
     setMessage,
@@ -183,6 +242,7 @@ export const useChatController = () => {
     handleNewSession,
     handleSelectSession,
     handleSendMessage,
+    handleExport,
     getUserInitials,
   }
 }

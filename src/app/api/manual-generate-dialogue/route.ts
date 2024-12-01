@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { elevenLabs, Character } from '@/utils/elevenlabs'
-import { s3Service } from '@/utils/s3'
-import { redisService } from '@/utils/redis'
-import { generateSRT, generateVTT, generateTranscript } from '@/utils/subtitles'
-import { ConversationFlowManager } from '@/utils/conversation-flow'
-import { CharacterVoice } from '@/utils/voice-config'
-import { createManualDialogue } from '@/utils/dynamodb/manual-dialogues'
-import { chunkDialogue, validateDialogueLength } from '@/utils/dialogue-chunker'
-import { auth } from '@clerk/nextjs/server'
+import { elevenLabs, Character, VoiceSettings } from '../../../utils/elevenlabs'
+import { s3Service } from '../../../utils/s3'
+import { redisService } from '../../../utils/redis'
+import { generateSRT, generateVTT, generateTranscript } from '../../../utils/subtitles'
+import { ConversationFlowManager } from '../../../utils/conversation-flow'
+import { CharacterVoice } from '../../../utils/voice-config'
+import { createManualDialogue } from '../../../utils/dynamodb/manual-dialogues'
+import { chunkDialogue, validateDialogueLength } from '../../../utils/dialogue-chunker'
+import { getAuth } from '@clerk/nextjs/server'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -20,6 +20,11 @@ if (!AWS_BUCKET_NAME) {
 
 if (!GOOGLE_API_KEY) {
   throw new Error('Missing GOOGLE_API_KEY environment variable')
+}
+
+const defaultVoiceSettings: VoiceSettings = {
+  stability: 0.5,
+  similarity_boost: 0.75
 }
 
 interface DialogueTurn {
@@ -61,16 +66,30 @@ interface ChunkProcessingMetadata {
 
 export async function POST(req: NextRequest) {
   try {
-    const authResult = await auth()
-    if (!authResult?.userId) {
+    const { userId } = getAuth(req)
+    if (!userId) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       )
     }
 
-    const userId = authResult.userId
     const body = await req.json() as ManualGenerateRequest
+
+    // Validate characters and dialogue
+    const validCharacterNames = body.characters.map(c => c.customName)
+    console.log('Valid character names:', validCharacterNames)
+    console.log('Dialogue turns:', body.dialogue)
+
+    const invalidTurns = body.dialogue.filter(turn => !validCharacterNames.includes(turn.character))
+    if (invalidTurns.length > 0) {
+      console.error('Invalid turns:', invalidTurns)
+      return NextResponse.json(
+        { error: `Invalid character names in dialogue: ${invalidTurns.map(t => t.character).join(', ')}` },
+        { status: 400 }
+      )
+    }
+
     const dialogueId = uuidv4()
 
     // Validate dialogue length and get chunking info
@@ -192,12 +211,9 @@ async function processDialogueChunk(
 
     // Create a Character object for ElevenLabs
     const character: Character = {
-      name: characterConfig.customName,
       voiceId: characterConfig.voiceId,
-      settings: {
-        stability: 0.5,
-        similarity_boost: 0.75
-      }
+      name: characterConfig.customName,
+      settings: defaultVoiceSettings
     }
 
     // Analyze conversation flow

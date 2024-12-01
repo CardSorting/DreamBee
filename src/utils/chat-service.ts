@@ -14,38 +14,50 @@ export interface ChatSession {
 
 class ChatService {
   async createNewSession(userId: string, title: string): Promise<ChatSession> {
-    const response = await fetch('/api/chat/sessions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title })
-    })
+    try {
+      const response = await fetch('/api/chat/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title })
+      })
 
-    if (!response.ok) {
+      if (!response.ok) {
+        throw new Error('Failed to create chat session')
+      }
+
+      const data = await response.json()
+      return data.session
+    } catch (error) {
+      console.error('Error creating chat session:', error)
       throw new Error('Failed to create chat session')
     }
-
-    return await response.json()
   }
 
   async addMessageToSession(userId: string, session: ChatSession, role: 'user' | 'assistant', content: string): Promise<ChatSession> {
-    const response = await fetch(`/api/chat/sessions/${session.id}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        role,
-        content
+    try {
+      const response = await fetch(`/api/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          role,
+          content
+        })
       })
-    })
 
-    if (!response.ok) {
+      if (!response.ok) {
+        throw new Error('Failed to add message to session')
+      }
+
+      const data = await response.json()
+      return data.session
+    } catch (error) {
+      console.error('Error adding message to session:', error)
       throw new Error('Failed to add message to session')
     }
-
-    return await response.json()
   }
 
   async chat(messages: ChatMessage[]): Promise<string> {
@@ -168,28 +180,36 @@ class ChatService {
     }
   }
 
-  private generateId(): string {
-    return Math.random().toString(36).substring(2) + Date.now().toString(36)
-  }
-
   // Session management methods
   async getSession(userId: string, id: string): Promise<ChatSession | null> {
-    const response = await fetch(`/api/chat/sessions/${id}`)
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null
+    try {
+      const response = await fetch(`/api/chat/sessions/${id}`)
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null
+        }
+        throw new Error('Failed to fetch chat session')
       }
+      const data = await response.json()
+      return data.session
+    } catch (error) {
+      console.error('Error getting session:', error)
       throw new Error('Failed to fetch chat session')
     }
-    return await response.json()
   }
 
   async getAllSessions(userId: string): Promise<ChatSession[]> {
-    const response = await fetch('/api/chat/sessions')
-    if (!response.ok) {
+    try {
+      const response = await fetch('/api/chat/sessions')
+      if (!response.ok) {
+        throw new Error('Failed to fetch chat sessions')
+      }
+      const data = await response.json()
+      return data.sessions || []
+    } catch (error) {
+      console.error('Error getting sessions:', error)
       throw new Error('Failed to fetch chat sessions')
     }
-    return await response.json()
   }
 
   async deleteSession(userId: string, id: string): Promise<boolean> {
@@ -205,22 +225,28 @@ class ChatService {
   }
 
   async updateSessionTitle(userId: string, id: string, title: string): Promise<ChatSession | null> {
-    const response = await fetch(`/api/chat/sessions/${id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title })
-    })
+    try {
+      const response = await fetch(`/api/chat/sessions/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title })
+      })
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null
+        }
+        throw new Error('Failed to update chat session')
       }
+
+      const data = await response.json()
+      return data.session
+    } catch (error) {
+      console.error('Error updating session:', error)
       throw new Error('Failed to update chat session')
     }
-
-    return await response.json()
   }
 }
 
