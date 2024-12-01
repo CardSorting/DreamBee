@@ -22,7 +22,7 @@ export class AudioMerger {
     this.onProgress = onProgress
   }
 
-  async mergeAudioSegments(segments: AudioSegmentInfo[]): Promise<Blob | null> {
+  async mergeAudioSegments(segments: AudioSegmentInfo[]): Promise<Blob> {
     try {
       this.onProgress?.({ 
         stage: 'loading', 
@@ -47,7 +47,8 @@ export class AudioMerger {
       return result
     } catch (error) {
       console.error('Error merging audio:', error)
-      return null
+      // Instead of returning null, throw the error to propagate it
+      throw error instanceof Error ? error : new Error('Unknown error occurred during audio merge')
     }
   }
 
@@ -61,6 +62,9 @@ let audioMergerInstance: AudioMerger | null = null
 
 export function getAudioMerger(onProgress?: (progress: MergeProgress) => void): AudioMerger {
   if (!audioMergerInstance) {
+    audioMergerInstance = new AudioMerger(onProgress)
+  } else {
+    // Update the progress callback if provided
     audioMergerInstance = new AudioMerger(onProgress)
   }
   return audioMergerInstance
