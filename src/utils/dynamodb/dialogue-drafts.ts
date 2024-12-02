@@ -42,13 +42,30 @@ export async function saveDraft(draft: Omit<DialogueDraft, 'draftId' | 'createdA
     status: 'draft'
   }
 
-  const command = new PutCommand({
-    TableName: TABLE_NAME,
-    Item: item
-  })
+  try {
+    console.log('Saving draft:', {
+      userId: item.userId,
+      draftId: item.draftId,
+      title: item.title,
+      status: item.status
+    })
 
-  await docClient.send(command)
-  return item
+    const command = new PutCommand({
+      TableName: TABLE_NAME,
+      Item: item
+    })
+
+    await docClient.send(command)
+    console.log('Draft saved successfully')
+    return item
+  } catch (error: any) {
+    console.error('Failed to save draft:', {
+      error: error.message,
+      code: error.code,
+      name: error.name
+    })
+    throw error
+  }
 }
 
 export async function updateDraft(
@@ -58,80 +75,149 @@ export async function updateDraft(
 ): Promise<DialogueDraft> {
   const timestamp = Date.now()
 
-  // Build update expression
-  let updateExpression = 'SET updatedAt = :updatedAt'
-  const expressionAttributeValues: { [key: string]: any } = {
-    ':updatedAt': timestamp
-  }
-  const expressionAttributeNames: { [key: string]: string } = {}
+  try {
+    console.log('Updating draft:', { userId, draftId, updates })
 
-  Object.entries(updates).forEach(([key, value]) => {
-    if (key !== 'userId' && key !== 'draftId' && key !== 'createdAt') {
-      updateExpression += `, #${key} = :${key}`
-      expressionAttributeValues[`:${key}`] = value
-      expressionAttributeNames[`#${key}`] = key
+    // Build update expression
+    let updateExpression = 'SET updatedAt = :updatedAt'
+    const expressionAttributeValues: { [key: string]: any } = {
+      ':updatedAt': timestamp
     }
-  })
+    const expressionAttributeNames: { [key: string]: string } = {}
 
-  const command = new UpdateCommand({
-    TableName: TABLE_NAME,
-    Key: {
-      userId,
-      draftId
-    },
-    UpdateExpression: updateExpression,
-    ExpressionAttributeValues: expressionAttributeValues,
-    ExpressionAttributeNames: expressionAttributeNames,
-    ReturnValues: 'ALL_NEW'
-  })
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key !== 'userId' && key !== 'draftId' && key !== 'createdAt') {
+        updateExpression += `, #${key} = :${key}`
+        expressionAttributeValues[`:${key}`] = value
+        expressionAttributeNames[`#${key}`] = key
+      }
+    })
 
-  const response = await docClient.send(command)
-  return response.Attributes as DialogueDraft
+    const command = new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        userId,
+        draftId
+      },
+      UpdateExpression: updateExpression,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ReturnValues: 'ALL_NEW'
+    })
+
+    const response = await docClient.send(command)
+    console.log('Draft updated successfully')
+    return response.Attributes as DialogueDraft
+  } catch (error: any) {
+    console.error('Failed to update draft:', {
+      error: error.message,
+      code: error.code,
+      name: error.name
+    })
+    throw error
+  }
 }
 
 export async function getDraft(userId: string, draftId: string): Promise<DialogueDraft | null> {
-  const command = new GetCommand({
-    TableName: TABLE_NAME,
-    Key: {
-      userId,
-      draftId
-    }
-  })
+  try {
+    console.log('Getting draft:', { userId, draftId })
 
-  const response = await docClient.send(command)
-  return (response.Item as DialogueDraft) || null
+    const command = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        userId,
+        draftId
+      }
+    })
+
+    const response = await docClient.send(command)
+    console.log('Draft retrieved:', response.Item ? 'found' : 'not found')
+    return (response.Item as DialogueDraft) || null
+  } catch (error: any) {
+    console.error('Failed to get draft:', {
+      error: error.message,
+      code: error.code,
+      name: error.name
+    })
+    throw error
+  }
 }
 
 export async function listDrafts(userId: string, limit = 10): Promise<DialogueDraft[]> {
-  const command = new QueryCommand({
-    TableName: TABLE_NAME,
-    IndexName: 'CreatedAtIndex',
-    KeyConditionExpression: 'userId = :userId',
-    ExpressionAttributeValues: {
-      ':userId': userId,
-      ':status': 'draft'
-    },
-    FilterExpression: 'status = :status',
-    Limit: limit,
-    ScanIndexForward: false // Sort by createdAt in descending order
-  })
+  try {
+    console.log('Listing drafts for user:', userId)
 
-  const response = await docClient.send(command)
-  return (response.Items as DialogueDraft[]) || []
+    // Query using the primary key (userId) and filter by status
+    // Use ExpressionAttributeNames to handle reserved keyword 'status'
+    const command = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'userId = :userId',
+      FilterExpression: '#s = :status',
+      ExpressionAttributeNames: {
+        '#s': 'status'
+      },
+      ExpressionAttributeValues: {
+        ':userId': userId,
+        ':status': 'draft'
+      },
+      Limit: limit,
+      ScanIndexForward: false // Sort by sort key (draftId) in descending order
+    })
+
+    const response = await docClient.send(command)
+    console.log('Drafts retrieved:', {
+      count: response.Items?.length || 0,
+      scannedCount: response.ScannedCount
+    })
+
+    return (response.Items as DialogueDraft[]) || []
+  } catch (error: any) {
+    console.error('Failed to list drafts:', {
+      error: error.message,
+      code: error.code,
+      name: error.name,
+      userId
+    })
+    throw error
+  }
 }
 
 export async function deleteDraft(userId: string, draftId: string): Promise<void> {
-  const command = new DeleteCommand({
-    TableName: TABLE_NAME,
-    Key: {
-      userId,
-      draftId
-    }
-  })
+  try {
+    console.log('Deleting draft:', { userId, draftId })
 
-  await docClient.send(command)
+    const command = new DeleteCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        userId,
+        draftId
+      }
+    })
+
+    await docClient.send(command)
+    console.log('Draft deleted successfully')
+  } catch (error: any) {
+    console.error('Failed to delete draft:', {
+      error: error.message,
+      code: error.code,
+      name: error.name
+    })
+    throw error
+  }
 }
 
 export async function publishDraft(userId: string, draftId: string): Promise<DialogueDraft> {
-  return updateDraft(userId, draftId, { status: 'published' })
+  try {
+    console.log('Publishing draft:', { userId, draftId })
+    const result = await updateDraft(userId, draftId, { status: 'published' })
+    console.log('Draft published successfully')
+    return result
+  } catch (error: any) {
+    console.error('Failed to publish draft:', {
+      error: error.message,
+      code: error.code,
+      name: error.name
+    })
+    throw error
+  }
 }
