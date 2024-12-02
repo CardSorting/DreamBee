@@ -23,15 +23,9 @@ export interface AudioPreviewProps {
   onError: (error: string) => void
 }
 
-export class AudioProcessingError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode: number = 500,
-    public readonly details?: any
-  ) {
-    super(message)
-    this.name = 'AudioProcessingError'
-  }
+export interface AudioProcessingError extends Error {
+  statusCode: number
+  details?: any
 }
 
 export interface AudioProgressState {
@@ -41,9 +35,23 @@ export interface AudioProgressState {
   progress: number
 }
 
+export interface Subtitle {
+  text: string
+  start: number
+  end: number
+  speaker?: string | null
+  words?: Array<{
+    text: string
+    start: number
+    end: number
+    confidence: number
+    speaker?: string | null
+  }>
+}
+
 export interface SubtitleDisplayProps {
-  currentSubtitle: import('./VTTParser').Cue | null
-  nextSubtitle: import('./VTTParser').Cue | null
+  currentSubtitle: Subtitle | null
+  nextSubtitle: Subtitle | null
 }
 
 export interface ProgressBarProps {

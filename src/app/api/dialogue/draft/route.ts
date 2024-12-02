@@ -25,11 +25,27 @@ export async function POST(req: NextRequest) {
     } = data
 
     // Validate required fields
-    if (!title || !audioUrls || !metadata || !transcript) {
+    if (!title || !audioUrls || !metadata) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       )
+    }
+
+    // Validate AssemblyAI result
+    if (!assemblyAiResult?.text || !assemblyAiResult?.subtitles) {
+      console.error('Invalid AssemblyAI result:', assemblyAiResult)
+      return NextResponse.json(
+        { error: 'Invalid transcription result' },
+        { status: 400 }
+      )
+    }
+
+    // Ensure transcript has required fields
+    const processedTranscript = {
+      srt: transcript?.srt || '',
+      vtt: transcript?.vtt || '',
+      json: transcript?.json || assemblyAiResult // Use raw result if no JSON provided
     }
 
     // Save as draft
@@ -39,9 +55,16 @@ export async function POST(req: NextRequest) {
       description,
       audioUrls,
       metadata,
-      transcript,
+      transcript: processedTranscript,
       assemblyAiResult,
       status: 'draft'
+    })
+
+    console.log('Draft saved successfully:', {
+      draftId: draft.draftId,
+      title: draft.title,
+      transcriptLength: assemblyAiResult.text.length,
+      subtitleCount: assemblyAiResult.subtitles.length
     })
 
     return NextResponse.json(draft)

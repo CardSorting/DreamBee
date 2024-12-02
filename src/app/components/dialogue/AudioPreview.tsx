@@ -7,7 +7,7 @@ import { TimeFormatter } from './utils/TimeFormatter'
 import { AudioPreviewProps } from './utils/types'
 import { PlayButton } from './components/PlayButton'
 import { ProgressBar } from './components/ProgressBar'
-import { SubtitleDisplay } from './components/SubtitleDisplay'
+import SubtitleDisplay from './components/SubtitleDisplay'
 import axios from 'axios'
 
 const LoadingState = memo(({ status, progress }: { status: string, progress: number }) => (
@@ -44,19 +44,26 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   const saveToDrafts = useCallback(async (transcription: any) => {
     try {
       setStatus('Saving draft')
+      console.log('Saving transcription to drafts:', {
+        title: result.title,
+        transcriptionLength: transcription.text?.length,
+        subtitleCount: transcription.subtitles?.length
+      })
+
       const response = await axios.post('/api/dialogue/draft', {
         title: result.title || 'Untitled Dialogue',
         description: result.description,
         audioUrls: result.audioUrls,
         metadata: result.metadata,
         transcript: {
-          srt: transcription.srt,
-          vtt: transcription.vtt,
-          json: transcription.json
+          srt: transcription.srt || '',
+          vtt: transcription.vtt || '',
+          json: transcription
         },
         assemblyAiResult: transcription
       })
 
+      console.log('Draft saved successfully:', response.data)
       setDraftId(response.data.draftId)
       setStatus('Ready')
     } catch (error) {
@@ -103,6 +110,12 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
           }
         )
 
+        console.log('Received transcription:', {
+          textLength: transcription.text?.length,
+          subtitleCount: transcription.subtitles?.length,
+          speakers: transcription.speakers
+        })
+
         setTranscriptionResult(transcription)
         
         // Save to drafts after successful processing
@@ -126,34 +139,48 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
 
   // Update subtitles based on current time
   useEffect(() => {
-    if (!transcriptionResult) return
+    if (!transcriptionResult?.subtitles?.length) {
+      console.log('No subtitles available in transcription result')
+      return
+    }
+
+    console.log('Current transcription result:', {
+      subtitleCount: transcriptionResult.subtitles.length,
+      speakers: transcriptionResult.speakers
+    })
 
     const updateSubtitles = () => {
       const time = audioRef.current?.currentTime || 0
-      const { subtitles } = transcriptionResult
+      console.log('Current time:', time)
 
-      // Find current subtitle with a small buffer for smoother transitions
-      const bufferTime = 0.1
-      const adjustedTime = time + bufferTime
-
-      const current = subtitles.find(
-        (sub: any) => adjustedTime >= sub.start && adjustedTime <= sub.end
+      // Find current subtitle
+      const current = transcriptionResult.subtitles.find(
+        (sub: any) => time >= sub.start && time <= sub.end
       )
 
-      // Find next subtitle within a 2-second window
-      const next = subtitles.find(
-        (sub: any) => 
-          sub.start > time && 
-          sub.start <= time + 2 && 
-          (!current || sub.start > current.end)
-      )
+      // Find next subtitle
+      const currentIndex = current ? transcriptionResult.subtitles.indexOf(current) : -1
+      const next = currentIndex > -1 ? transcriptionResult.subtitles[currentIndex + 1] : null
+
+      console.log('Subtitle update:', {
+        current: current?.text,
+        next: next?.text,
+        time
+      })
 
       setCurrentSubtitle(current || null)
       setNextSubtitle(next || null)
     }
 
+    // Update immediately and then on time updates
     updateSubtitles()
-  }, [transcriptionResult, currentTime])
+
+    const audio = audioRef.current
+    if (audio) {
+      audio.addEventListener('timeupdate', updateSubtitles)
+      return () => audio.removeEventListener('timeupdate', updateSubtitles)
+    }
+  }, [transcriptionResult])
 
   const togglePlayback = useCallback(() => {
     if (audioRef.current) {

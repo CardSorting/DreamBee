@@ -1,9 +1,12 @@
-import { useRef } from 'react'
+import { useRef, memo } from 'react'
 import { SubtitleDisplayProps } from '../utils/types'
 import { SubtitleStyleManager } from '../utils/SubtitleStyleManager'
 
-export const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps) => {
+const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps) => {
   const styleManager = useRef(new SubtitleStyleManager())
+
+  // Debug logging
+  console.log('SubtitleDisplay props:', { currentSubtitle, nextSubtitle })
 
   if (!currentSubtitle && !nextSubtitle) {
     return (
@@ -21,7 +24,7 @@ export const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDispl
         {currentSubtitle && (
           <div className={styleManager.current.getSubtitleStyles('current')}>
             <div className={styleManager.current.getSpeakerStyles('current')}>
-              {currentSubtitle.speaker}
+              {currentSubtitle.speaker || 'Speaker'}
             </div>
             <div 
               className={`${styleManager.current.getTextStyles('current')} mt-1`}
@@ -30,7 +33,10 @@ export const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDispl
                 whiteSpace: 'pre-wrap'
               }}
             >
-              {currentSubtitle.text}
+              {currentSubtitle.text || ''}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {Math.floor(currentSubtitle.start)}s - {Math.floor(currentSubtitle.end)}s
             </div>
           </div>
         )}
@@ -40,7 +46,7 @@ export const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDispl
             aria-label="Next subtitle"
           >
             <div className={styleManager.current.getSpeakerStyles('next')}>
-              {nextSubtitle.speaker}
+              {nextSubtitle.speaker || 'Speaker'}
             </div>
             <div 
               className={`${styleManager.current.getTextStyles('next')} mt-1`}
@@ -49,7 +55,10 @@ export const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDispl
                 whiteSpace: 'pre-wrap'
               }}
             >
-              {nextSubtitle.text}
+              {nextSubtitle.text || ''}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {Math.floor(nextSubtitle.start)}s - {Math.floor(nextSubtitle.end)}s
             </div>
           </div>
         )}
@@ -59,4 +68,4 @@ export const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDispl
 }
 
 // Optimization: Prevent unnecessary re-renders
-export default SubtitleDisplay
+export default memo(SubtitleDisplay)
