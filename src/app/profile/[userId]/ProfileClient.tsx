@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui
 import { LoadingSpinner } from './components/LoadingSpinner'
 import { PublishedTab } from './components/PublishedTab'
 import { FavoritesTab } from './components/FavoritesTab'
+import { DraftsTab } from './components/DraftsTab'
 
 interface ProfileClientProps {
   userId: string
@@ -216,6 +217,9 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
           <TabsList className="border-b p-2">
             <TabsTrigger value="published">Published</TabsTrigger>
             <TabsTrigger value="favorites">Favorites</TabsTrigger>
+            {isOwner && (
+              <TabsTrigger value="drafts">Drafts</TabsTrigger>
+            )}
           </TabsList>
           <div className="p-6">
             <TabsContent value="published">
@@ -224,6 +228,11 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
             <TabsContent value="favorites">
               <FavoritesTab userId={userId} />
             </TabsContent>
+            {isOwner && (
+              <TabsContent value="drafts">
+                <DraftsTab userId={userId} />
+              </TabsContent>
+            )}
           </div>
         </Tabs>
       </div>
