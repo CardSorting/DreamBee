@@ -13,17 +13,22 @@ interface ProfileTabProps {
 function PublishedTab({ userId }: ProfileTabProps) {
   const [dialogues, setDialogues] = useState<UserPublishedDialogue[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchPublished = async () => {
       try {
+        setIsLoading(true)
+        setError(null)
         const response = await fetch(`/api/profile/${userId}/published`)
-        if (response.ok) {
-          const data = await response.json()
-          setDialogues(data.dialogues)
+        if (!response.ok) {
+          throw new Error('Failed to fetch published dialogues')
         }
+        const data = await response.json()
+        setDialogues(data.dialogues || [])
       } catch (error) {
         console.error('Error fetching published dialogues:', error)
+        setError('Failed to load published dialogues')
       } finally {
         setIsLoading(false)
       }
@@ -38,7 +43,11 @@ function PublishedTab({ userId }: ProfileTabProps) {
     </div>
   }
 
-  if (dialogues.length === 0) {
+  if (error) {
+    return <div className="text-center py-8 text-red-500">{error}</div>
+  }
+
+  if (!dialogues || dialogues.length === 0) {
     return <div className="text-center py-8 text-gray-500">
       No published dialogues
     </div>
@@ -54,17 +63,17 @@ function PublishedTab({ userId }: ProfileTabProps) {
             <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
               {dialogue.genre}
             </span>
-            {dialogue.hashtags.map((tag) => (
+            {dialogue.hashtags?.map((tag) => (
               <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
                 #{tag}
               </span>
             ))}
           </div>
           <div className="flex gap-4 mt-4 text-sm text-gray-500">
-            <span>❤️ {dialogue.stats.likes}</span>
-            <span>👎 {dialogue.stats.dislikes}</span>
-            <span>⭐ {dialogue.stats.favorites}</span>
-            <span>💬 {dialogue.stats.comments}</span>
+            <span>❤️ {dialogue.stats?.likes || 0}</span>
+            <span>👎 {dialogue.stats?.dislikes || 0}</span>
+            <span>⭐ {dialogue.stats?.favorites || 0}</span>
+            <span>💬 {dialogue.stats?.comments || 0}</span>
           </div>
         </div>
       ))}
@@ -75,17 +84,22 @@ function PublishedTab({ userId }: ProfileTabProps) {
 function FavoritesTab({ userId }: ProfileTabProps) {
   const [dialogues, setDialogues] = useState<UserPublishedDialogue[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchFavorites = async () => {
       try {
+        setIsLoading(true)
+        setError(null)
         const response = await fetch(`/api/profile/${userId}/favorites`)
-        if (response.ok) {
-          const data = await response.json()
-          setDialogues(data.dialogues)
+        if (!response.ok) {
+          throw new Error('Failed to fetch favorite dialogues')
         }
+        const data = await response.json()
+        setDialogues(data.dialogues || [])
       } catch (error) {
         console.error('Error fetching favorites:', error)
+        setError('Failed to load favorite dialogues')
       } finally {
         setIsLoading(false)
       }
@@ -100,7 +114,11 @@ function FavoritesTab({ userId }: ProfileTabProps) {
     </div>
   }
 
-  if (dialogues.length === 0) {
+  if (error) {
+    return <div className="text-center py-8 text-red-500">{error}</div>
+  }
+
+  if (!dialogues || dialogues.length === 0) {
     return <div className="text-center py-8 text-gray-500">
       No favorite dialogues
     </div>
@@ -116,17 +134,17 @@ function FavoritesTab({ userId }: ProfileTabProps) {
             <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
               {dialogue.genre}
             </span>
-            {dialogue.hashtags.map((tag) => (
+            {dialogue.hashtags?.map((tag) => (
               <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
                 #{tag}
               </span>
             ))}
           </div>
           <div className="flex gap-4 mt-4 text-sm text-gray-500">
-            <span>❤️ {dialogue.stats.likes}</span>
-            <span>👎 {dialogue.stats.dislikes}</span>
-            <span>⭐ {dialogue.stats.favorites}</span>
-            <span>💬 {dialogue.stats.comments}</span>
+            <span>❤️ {dialogue.stats?.likes || 0}</span>
+            <span>👎 {dialogue.stats?.dislikes || 0}</span>
+            <span>⭐ {dialogue.stats?.favorites || 0}</span>
+            <span>💬 {dialogue.stats?.comments || 0}</span>
           </div>
         </div>
       ))}
@@ -143,18 +161,23 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isFollowing, setIsFollowing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const isOwner = user?.id === userId
 
   useEffect(() => {
     const fetchProfile = async () => {
       try {
+        setIsLoading(true)
+        setError(null)
         const response = await fetch(`/api/profile/${userId}`)
-        if (response.ok) {
-          const data = await response.json()
-          setProfile(data.profile)
+        if (!response.ok) {
+          throw new Error('Failed to fetch profile')
         }
+        const data = await response.json()
+        setProfile(data.profile)
       } catch (error) {
         console.error('Error fetching profile:', error)
+        setError('Failed to load profile')
       } finally {
         setIsLoading(false)
       }
@@ -168,14 +191,15 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
       const response = await fetch(`/api/profile/${userId}/follow`, {
         method: 'POST'
       })
-      if (response.ok) {
-        setIsFollowing(true)
-        // Refresh profile to update follower count
-        const profileResponse = await fetch(`/api/profile/${userId}`)
-        if (profileResponse.ok) {
-          const data = await profileResponse.json()
-          setProfile(data.profile)
-        }
+      if (!response.ok) {
+        throw new Error('Failed to follow user')
+      }
+      setIsFollowing(true)
+      // Refresh profile to update follower count
+      const profileResponse = await fetch(`/api/profile/${userId}`)
+      if (profileResponse.ok) {
+        const data = await profileResponse.json()
+        setProfile(data.profile)
       }
     } catch (error) {
       console.error('Error following user:', error)
@@ -190,6 +214,22 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
     )
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600">{error}</h1>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (!profile) {
     return (
       <div className="min-h-screen bg-gray-50 flex justify-center items-center">
@@ -200,6 +240,10 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
       </div>
     )
   }
+
+  // Get display name or fallback
+  const displayName = profile.username || user?.username || 'User';
+  const firstLetter = displayName.charAt(0).toUpperCase();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -240,21 +284,21 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
               {profile.avatarUrl ? (
                 <img
                   src={profile.avatarUrl}
-                  alt={profile.username}
+                  alt={displayName}
                   className="w-24 h-24 rounded-full"
                 />
               ) : (
                 <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
                   <span className="text-3xl text-gray-500">
-                    {profile.username.charAt(0).toUpperCase()}
+                    {firstLetter}
                   </span>
                 </div>
               )}
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-4">
-                <h1 className="text-2xl font-bold text-gray-900">{profile.username}</h1>
-                <span className="text-gray-500">{profile.userTag}</span>
+                <h1 className="text-2xl font-bold text-gray-900">{displayName}</h1>
+                {profile.userTag && <span className="text-gray-500">{profile.userTag}</span>}
                 {!isOwner && (
                   <button
                     onClick={handleFollow}
@@ -274,19 +318,19 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
               <div className="flex gap-6 mt-4">
                 <div>
                   <div className="text-sm text-gray-500">Published</div>
-                  <div className="font-medium">{profile.stats.publishedCount}</div>
+                  <div className="font-medium">{profile.stats?.publishedCount || 0}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Followers</div>
-                  <div className="font-medium">{profile.stats.followersCount}</div>
+                  <div className="font-medium">{profile.stats?.followersCount || 0}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Following</div>
-                  <div className="font-medium">{profile.stats.followingCount}</div>
+                  <div className="font-medium">{profile.stats?.followingCount || 0}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Total Likes</div>
-                  <div className="font-medium">{profile.stats.totalLikesReceived}</div>
+                  <div className="font-medium">{profile.stats?.totalLikesReceived || 0}</div>
                 </div>
               </div>
             </div>

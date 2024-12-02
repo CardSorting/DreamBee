@@ -3,12 +3,12 @@ import { BaseItem } from '../types'
 export interface UserProfile extends BaseItem {
   type: 'USER_PROFILE'
   userId: string
-  username: string
-  userTag: string // e.g., @johndoe
+  username?: string // Made optional since we have fallbacks
+  userTag?: string // Made optional since we check for existence
   bio?: string
   avatarUrl?: string
   isSuspended?: boolean
-  stats: {
+  stats?: { // Made optional since we provide defaults
     publishedCount: number
     likesCount: number // likes given
     favoritesCount: number

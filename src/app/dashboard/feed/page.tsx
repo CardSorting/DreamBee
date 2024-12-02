@@ -4,12 +4,18 @@ import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { PublishedDialogue, DIALOGUE_GENRES, DialogueGenre } from '../../../utils/dynamodb/types/published-dialogue'
 
+interface UserReactions {
+  [dialogueId: string]: 'LIKE' | 'DISLIKE' | 'FAVORITE' | null;
+}
+
 export default function FeedPage() {
   const { user } = useUser()
   const [dialogues, setDialogues] = useState<PublishedDialogue[]>([])
+  const [userReactions, setUserReactions] = useState<UserReactions>({})
   const [selectedGenre, setSelectedGenre] = useState<DialogueGenre | 'All'>('All')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   useEffect(() => {
     loadDialogues()
@@ -22,7 +28,20 @@ export default function FeedPage() {
       const response = await fetch(`/api/feed?genre=${selectedGenre}`)
       if (!response.ok) throw new Error('Failed to load dialogues')
       const data = await response.json()
-      setDialogues(data.dialogues)
+      setDialogues(data.dialogues || [])
+
+      // Load user reactions for these dialogues
+      if (data.dialogues?.length > 0) {
+        const reactions: UserReactions = {}
+        for (const dialogue of data.dialogues) {
+          const reactionResponse = await fetch(`/api/feed/${dialogue.dialogueId}/reaction`)
+          if (reactionResponse.ok) {
+            const { type } = await reactionResponse.json()
+            reactions[dialogue.dialogueId] = type
+          }
+        }
+        setUserReactions(reactions)
+      }
     } catch (err) {
       setError('Failed to load dialogues')
       console.error(err)
@@ -31,44 +50,106 @@ export default function FeedPage() {
     }
   }
 
-  const handleLike = async (dialogueId: string) => {
+  const handleAction = async (dialogueId: string, action: 'like' | 'dislike' | 'favorite') => {
+    if (actionInProgress) return;
+    
     try {
-      const response = await fetch(`/api/feed/${dialogueId}/like`, {
-        method: 'POST'
-      })
-      if (!response.ok) throw new Error('Failed to like dialogue')
-      await loadDialogues()
-    } catch (err) {
-      console.error(err)
-    }
-  }
+      setActionInProgress(dialogueId);
 
-  const handleDislike = async (dialogueId: string) => {
-    try {
-      const response = await fetch(`/api/feed/${dialogueId}/dislike`, {
-        method: 'POST'
-      })
-      if (!response.ok) throw new Error('Failed to dislike dialogue')
-      await loadDialogues()
-    } catch (err) {
-      console.error(err)
-    }
-  }
+      // Get the current dialogue
+      const dialogue = dialogues.find(d => d.dialogueId === dialogueId)
+      if (!dialogue) return;
 
-  const handleFavorite = async (dialogueId: string) => {
-    try {
-      const response = await fetch(`/api/feed/${dialogueId}/favorite`, {
+      // Optimistically update UI
+      const currentReaction = userReactions[dialogueId]
+      const newReaction = action === 'like' ? 'LIKE' : action === 'dislike' ? 'DISLIKE' : action === 'favorite' ? 'FAVORITE' : null
+
+      if (action === 'favorite') {
+        // Handle favorite toggle
+        const isFavorited = currentReaction === 'FAVORITE'
+        setUserReactions(prev => ({ ...prev, [dialogueId]: isFavorited ? null : 'FAVORITE' }))
+        setDialogues(prevDialogues => 
+          prevDialogues.map(d => {
+            if (d.dialogueId === dialogueId) {
+              return {
+                ...d,
+                favorites: d.favorites + (isFavorited ? -1 : 1)
+              }
+            }
+            return d
+          })
+        )
+      } else {
+        // Handle like/dislike
+        let likeDelta = 0
+        let dislikeDelta = 0
+
+        if (action === 'like') {
+          if (currentReaction === 'LIKE') {
+            likeDelta = -1
+            setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
+          } else {
+            likeDelta = 1
+            if (currentReaction === 'DISLIKE') {
+              dislikeDelta = -1
+            }
+            setUserReactions(prev => ({ ...prev, [dialogueId]: 'LIKE' }))
+          }
+        } else if (action === 'dislike') {
+          if (currentReaction === 'DISLIKE') {
+            dislikeDelta = -1
+            setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
+          } else {
+            dislikeDelta = 1
+            if (currentReaction === 'LIKE') {
+              likeDelta = -1
+            }
+            setUserReactions(prev => ({ ...prev, [dialogueId]: 'DISLIKE' }))
+          }
+        }
+
+        // Update local state
+        setDialogues(prevDialogues => 
+          prevDialogues.map(d => {
+            if (d.dialogueId === dialogueId) {
+              return {
+                ...d,
+                likes: d.likes + likeDelta,
+                dislikes: d.dislikes + dislikeDelta
+              }
+            }
+            return d
+          })
+        )
+      }
+
+      // Make API call
+      const response = await fetch(`/api/feed/${dialogueId}/${action}`, {
         method: 'POST'
       })
-      if (!response.ok) throw new Error('Failed to favorite dialogue')
-      await loadDialogues()
+      
+      if (!response.ok) {
+        throw new Error(`Failed to ${action} dialogue`)
+      }
+
+      // No need to refresh the entire feed
     } catch (err) {
-      console.error(err)
+      console.error(`Error ${action}ing dialogue:`, err)
+      // Revert optimistic update on error
+      await loadDialogues()
+      const errorMessage = err instanceof Error ? err.message : `Failed to ${action} dialogue`
+      setError(errorMessage)
+      setTimeout(() => setError(null), 3000)
+    } finally {
+      setActionInProgress(null)
     }
   }
 
   const handleComment = async (dialogueId: string, content: string) => {
+    if (!content.trim() || actionInProgress) return;
+    
     try {
+      setActionInProgress(dialogueId);
       const response = await fetch(`/api/feed/${dialogueId}/comment`, {
         method: 'POST',
         headers: {
@@ -76,16 +157,29 @@ export default function FeedPage() {
         },
         body: JSON.stringify({ content })
       })
-      if (!response.ok) throw new Error('Failed to add comment')
-      await loadDialogues()
+      if (!response.ok) {
+        throw new Error('Failed to add comment')
+      }
+      await loadDialogues() // Reload for comments since we need the new comment data
     } catch (err) {
-      console.error(err)
+      console.error('Error adding comment:', err)
+      setError('Failed to add comment')
+      setTimeout(() => setError(null), 3000)
+    } finally {
+      setActionInProgress(null)
     }
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Error Toast */}
+        {error && (
+          <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-50">
+            {error}
+          </div>
+        )}
+
         {/* Genre Filter */}
         <div className="mb-8">
           <div className="flex gap-2 overflow-x-auto pb-4">
@@ -101,7 +195,7 @@ export default function FeedPage() {
             </button>
             {DIALOGUE_GENRES.map((genre) => (
               <button
-                key={genre}
+                key={`genre-${genre}`}
                 onClick={() => setSelectedGenre(genre)}
                 className={`px-4 py-2 rounded-full whitespace-nowrap ${
                   selectedGenre === genre
@@ -130,7 +224,7 @@ export default function FeedPage() {
               Retry
             </button>
           </div>
-        ) : dialogues.length === 0 ? (
+        ) : !dialogues || dialogues.length === 0 ? (
           <div className="text-center py-12">
             <h3 className="text-lg font-medium text-gray-900">No dialogues found</h3>
             <p className="mt-2 text-gray-500">Be the first to publish a dialogue!</p>
@@ -138,7 +232,7 @@ export default function FeedPage() {
         ) : (
           <div className="space-y-6">
             {dialogues.map((dialogue) => (
-              <div key={dialogue.dialogueId} className="bg-white rounded-lg shadow p-6">
+              <div key={`${dialogue.pk}-${dialogue.sk}`} className="bg-white rounded-lg shadow p-6">
                 <div className="mb-4">
                   <h2 className="text-xl font-semibold text-gray-900">{dialogue.title}</h2>
                   <p className="mt-1 text-gray-600">{dialogue.description}</p>
@@ -146,8 +240,8 @@ export default function FeedPage() {
                     <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
                       {dialogue.genre}
                     </span>
-                    {dialogue.hashtags.map((tag) => (
-                      <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
+                    {dialogue.hashtags?.map((tag) => (
+                      <span key={`${dialogue.dialogueId}-${tag}`} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
                         #{tag}
                       </span>
                     ))}
@@ -162,22 +256,43 @@ export default function FeedPage() {
                 {/* Interaction Buttons */}
                 <div className="flex items-center gap-4 border-t border-b py-3">
                   <button
-                    onClick={() => handleLike(dialogue.dialogueId)}
-                    className="flex items-center gap-1 text-gray-600 hover:text-blue-600"
+                    onClick={() => handleAction(dialogue.dialogueId, 'like')}
+                    disabled={actionInProgress === dialogue.dialogueId}
+                    className={`flex items-center gap-1 ${
+                      userReactions[dialogue.dialogueId] === 'LIKE'
+                        ? 'text-blue-600'
+                        : 'text-gray-600 hover:text-blue-600'
+                    } ${
+                      actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
                     <span>👍</span>
                     <span>{dialogue.likes}</span>
                   </button>
                   <button
-                    onClick={() => handleDislike(dialogue.dialogueId)}
-                    className="flex items-center gap-1 text-gray-600 hover:text-blue-600"
+                    onClick={() => handleAction(dialogue.dialogueId, 'dislike')}
+                    disabled={actionInProgress === dialogue.dialogueId}
+                    className={`flex items-center gap-1 ${
+                      userReactions[dialogue.dialogueId] === 'DISLIKE'
+                        ? 'text-red-600'
+                        : 'text-gray-600 hover:text-red-600'
+                    } ${
+                      actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
                     <span>👎</span>
                     <span>{dialogue.dislikes}</span>
                   </button>
                   <button
-                    onClick={() => handleFavorite(dialogue.dialogueId)}
-                    className="flex items-center gap-1 text-gray-600 hover:text-yellow-600"
+                    onClick={() => handleAction(dialogue.dialogueId, 'favorite')}
+                    disabled={actionInProgress === dialogue.dialogueId}
+                    className={`flex items-center gap-1 ${
+                      userReactions[dialogue.dialogueId] === 'FAVORITE'
+                        ? 'text-yellow-600'
+                        : 'text-gray-600 hover:text-yellow-600'
+                    } ${
+                      actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
                     <span>⭐</span>
                     <span>{dialogue.favorites}</span>
@@ -188,8 +303,8 @@ export default function FeedPage() {
                 <div className="mt-4">
                   <h3 className="font-medium text-gray-900 mb-2">Comments</h3>
                   <div className="space-y-4">
-                    {dialogue.comments.map((comment) => (
-                      <div key={comment.commentId} className="bg-gray-50 p-3 rounded">
+                    {dialogue.comments?.map((comment) => (
+                      <div key={`${dialogue.dialogueId}-${comment.commentId}`} className="bg-gray-50 p-3 rounded">
                         <p className="text-gray-800">{comment.content}</p>
                         <div className="mt-2 text-sm text-gray-500">
                           <span>{new Date(comment.createdAt).toLocaleDateString()}</span>
@@ -204,7 +319,10 @@ export default function FeedPage() {
                     <input
                       type="text"
                       placeholder="Add a comment..."
-                      className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={actionInProgress === dialogue.dialogueId}
+                      className={`flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                       onKeyPress={(e) => {
                         if (e.key === 'Enter') {
                           const content = (e.target as HTMLInputElement).value

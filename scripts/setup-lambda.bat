@@ -17,15 +17,19 @@ for /f "usebackq tokens=1,* delims==" %%a in (".env.lambda") do (
     )
 )
 
-REM Set default values for Lambda configuration
-set "LAMBDA_FUNCTION_NAME=audio-processor"
-set "LAMBDA_TIMEOUT=900"
-set "LAMBDA_MEMORY_SIZE=2048"
-set "LAMBDA_ROLE_NAME=audio-processor-role"
+REM Set default values for Lambda configuration if not in .env.lambda
+if not defined LAMBDA_FUNCTION_NAME set "LAMBDA_FUNCTION_NAME=audio-processor"
+if not defined LAMBDA_TIMEOUT set "LAMBDA_TIMEOUT=900"
+if not defined LAMBDA_MEMORY_SIZE set "LAMBDA_MEMORY_SIZE=2048"
+if not defined LAMBDA_ROLE_NAME set "LAMBDA_ROLE_NAME=audio-processor-role"
 
 REM Verify required environment variables
 if not defined REDIS_URL (
     echo Error: REDIS_URL environment variable is not set in .env.lambda
+    exit /b 1
+)
+if not defined REDIS_TOKEN (
+    echo Error: REDIS_TOKEN environment variable is not set in .env.lambda
     exit /b 1
 )
 if not defined AWS_BUCKET_NAME (
@@ -79,7 +83,10 @@ set "LAMBDA_ROLE_ARN=arn:aws:iam::%AWS_ACCOUNT_ID%:role/%LAMBDA_ROLE_NAME%"
 REM Delete existing function if it exists
 aws lambda delete-function --function-name %LAMBDA_FUNCTION_NAME% 2>nul
 
-REM Create new Lambda function
+REM Create environment variables JSON using PowerShell
+powershell -Command "$env = @{ Variables = @{ REDIS_URL='%REDIS_URL%'; REDIS_TOKEN='%REDIS_TOKEN%'; AWS_BUCKET_NAME='%AWS_BUCKET_NAME%' } }; $json = ConvertTo-Json $env -Compress; Set-Content -Path env.json -Value $json"
+
+REM Create new Lambda function using environment variables from JSON file
 aws lambda create-function ^
     --function-name %LAMBDA_FUNCTION_NAME% ^
     --runtime nodejs18.x ^
@@ -89,7 +96,7 @@ aws lambda create-function ^
     --memory-size %LAMBDA_MEMORY_SIZE% ^
     --layers !PYTHON_LAYER_ARN! ^
     --zip-file fileb://function.zip ^
-    --environment "Variables={REDIS_URL=!REDIS_URL!,AWS_S3_BUCKET=!AWS_BUCKET_NAME!}"
+    --environment file://env.json
 
 if errorlevel 1 (
     echo Error: Failed to create Lambda function

@@ -62,14 +62,17 @@ mkdir "%TEMP_DIR%" || (
     exit /b 1
 )
 
-:: Check FFmpeg layer
+:: Check Python layer
 echo.
-echo Checking FFmpeg layer...
+echo Checking Python layer...
 echo =====================================
-aws lambda get-layer-version-by-arn --arn "arn:aws:lambda:us-east-1:590184106837:layer:ffmpeg-layer:6" > nul 2>&1
-if errorlevel 1 (
-    echo Error: FFmpeg layer not found or inaccessible
-    echo Please ensure the FFmpeg layer is properly configured
+aws lambda list-layer-versions --layer-name audio-processor-python --query "max_by(LayerVersions, &Version).LayerVersionArn" --output text > layer_arn.txt
+set /p PYTHON_LAYER_ARN=<layer_arn.txt
+del layer_arn.txt
+
+if not defined PYTHON_LAYER_ARN (
+    echo Error: Python layer not found
+    echo Please run setup-python-layer.bat first
     cd "%~dp0"
     rd /s /q "%TEMP_DIR%"
     exit /b 1
@@ -113,8 +116,8 @@ aws lambda update-function-configuration ^
     --timeout 900 ^
     --memory-size 3072 ^
     --ephemeral-storage Size=4096 ^
-    --environment "Variables={NODE_OPTIONS=--max-old-space-size=2800,TEMP_DIR=/tmp/audio-processing,FFMPEG_TIMEOUT=840000,REDIS_URL=%REDIS_URL%,REDIS_TOKEN=%REDIS_TOKEN%,AWS_BUCKET_NAME=%AWS_BUCKET_NAME%,MIN_AUDIO_BITRATE=128000,MIN_SAMPLE_RATE=44100,ENABLE_AUDIO_VERIFICATION=true,ENABLE_MD5_VERIFICATION=true,ENABLE_SHA256_VERIFICATION=true,MAX_COMPRESSION_RATIO=90}" ^
-    --layers "arn:aws:lambda:us-east-1:590184106837:layer:ffmpeg-layer:6" || (
+    --environment "Variables={NODE_OPTIONS=--max-old-space-size=2800,TEMP_DIR=/tmp/audio-processing,REDIS_URL=%REDIS_URL%,REDIS_TOKEN=%REDIS_TOKEN%,AWS_BUCKET_NAME=%AWS_BUCKET_NAME%,MIN_AUDIO_BITRATE=128000,MIN_SAMPLE_RATE=44100,ENABLE_AUDIO_VERIFICATION=true,ENABLE_MD5_VERIFICATION=true,ENABLE_SHA256_VERIFICATION=true,MAX_COMPRESSION_RATIO=90}" ^
+    --layers "%PYTHON_LAYER_ARN%" || (
     echo Error: Failed to update Lambda configuration
     cd "%~dp0"
     rd /s /q "%TEMP_DIR%"
@@ -179,7 +182,6 @@ echo - Memory: 3072 MB
 echo - Timeout: 900 seconds (15 minutes)
 echo - Ephemeral Storage: 4096 MB
 echo - Node Options: --max-old-space-size=2800
-echo - FFmpeg Timeout: 840 seconds (14 minutes)
 echo - Redis URL: %REDIS_URL:~0,20%...
 echo - Redis Token: %REDIS_TOKEN:~0,8%...
 echo - AWS Bucket: %AWS_BUCKET_NAME%
