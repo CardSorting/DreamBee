@@ -20,8 +20,8 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
   const [nextSubtitle, setNextSubtitle] = useState<any>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
-  // Get the merged audio URL from the first audio URL (assuming it's already merged)
-  const audioUrl = draft.audioUrls[0]?.url
+  // Get the merged audio URL from the first audio URL - using directUrl instead of url
+  const audioUrl = draft.audioUrls[0]?.directUrl
 
   const handleError = useCallback((error: Error) => {
     console.error('Audio playback error:', error.message)
@@ -32,38 +32,22 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
   const updateSubtitles = useCallback(() => {
     const subtitles = draft.assemblyAiResult?.subtitles
     if (!subtitles?.length) {
-      console.log('No subtitles available in AssemblyAI result')
       return
     }
 
-    const time = audioRef.current?.currentTime || 0
+    const time = (audioRef.current?.currentTime || 0) * 1000 // Convert to ms to match AssemblyAI timestamps
     
     // Find current subtitle using AssemblyAI timestamps
     const current = subtitles.find(
-      (sub: any) => time >= sub.start / 1000 && time <= sub.end / 1000
+      (sub: any) => time >= sub.start && time <= sub.end
     )
 
     // Find next subtitle
     const currentIndex = current ? subtitles.indexOf(current) : -1
     const next = currentIndex > -1 ? subtitles[currentIndex + 1] : null
 
-    // Convert AssemblyAI subtitle format to our format
-    const formatSubtitle = (sub: any) => sub ? {
-      text: sub.text,
-      start: sub.start / 1000,
-      end: sub.end / 1000,
-      speaker: sub.speaker || null,
-      words: sub.words?.map((w: any) => ({
-        text: w.text,
-        start: w.start / 1000,
-        end: w.end / 1000,
-        confidence: w.confidence,
-        speaker: w.speaker
-      }))
-    } : null
-
-    setCurrentSubtitle(formatSubtitle(current))
-    setNextSubtitle(formatSubtitle(next))
+    setCurrentSubtitle(current)
+    setNextSubtitle(next)
   }, [draft.assemblyAiResult?.subtitles])
 
   const togglePlayback = useCallback(() => {
