@@ -26,7 +26,7 @@ interface TranscriptionResult {
   text: string
   words: Word[]
   subtitles: Subtitle[]
-  speakers?: string[]
+  speakers: string[]
   confidence: number
 }
 
@@ -36,6 +36,7 @@ export class AssemblyAIProcessor {
     options: {
       speakerDetection?: boolean
       wordTimestamps?: boolean
+      speakerNames?: string[]
     } = {},
     onProgress?: (progress: number) => void
   ): Promise<TranscriptionResult> {
@@ -60,12 +61,13 @@ export class AssemblyAIProcessor {
 
       onProgress?.(50)
 
-      // Start transcription
+      // Start transcription with speaker names
       const transcriptionResponse = await axios.post('/api/audio/transcribe', {
         audioUrl: uploadUrl,
         options: {
           speakerDetection: options.speakerDetection
-        }
+        },
+        speakerNames: options.speakerNames // Pass speaker names to the API
       })
 
       const transcript = transcriptionResponse.data
@@ -98,12 +100,11 @@ export class AssemblyAIProcessor {
             start: Math.floor(word.start / 1000),   // Convert milliseconds to seconds and ensure integer
             end: Math.floor(word.end / 1000),       // Convert milliseconds to seconds and ensure integer
             confidence: word.confidence || 0,
-            speaker: utterance.speaker // Use utterance speaker for consistency
+            speaker: word.speaker
           })),
           speaker: utterance.speaker
         })),
-        speakers: transcript.utterances?.map((u: any) => u.speaker)
-          .filter((s: string | null): s is string => s !== null && s !== undefined),
+        speakers: transcript.speakers || [],
         confidence: transcript.confidence || 0
       }
 

@@ -5,9 +5,6 @@ import { SubtitleStyleManager } from '../utils/SubtitleStyleManager'
 const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps) => {
   const styleManager = useRef(new SubtitleStyleManager())
 
-  // Debug logging
-  console.log('SubtitleDisplay props:', { currentSubtitle, nextSubtitle })
-
   if (!currentSubtitle && !nextSubtitle) {
     return (
       <div className={styleManager.current.getContainerStyles()}>
@@ -28,10 +25,6 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
             </div>
             <div 
               className={`${styleManager.current.getTextStyles('current')} mt-1`}
-              style={{ 
-                wordBreak: 'break-word',
-                whiteSpace: 'pre-wrap'
-              }}
             >
               {currentSubtitle.text || ''}
             </div>
@@ -50,10 +43,6 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
             </div>
             <div 
               className={`${styleManager.current.getTextStyles('next')} mt-1`}
-              style={{ 
-                wordBreak: 'break-word',
-                whiteSpace: 'pre-wrap'
-              }}
             >
               {nextSubtitle.text || ''}
             </div>
@@ -67,5 +56,4 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
   )
 }
 
-// Optimization: Prevent unnecessary re-renders
 export default memo(SubtitleDisplay)

@@ -9,6 +9,8 @@ export interface DialogueDraft {
   draftId: string
   title: string
   description?: string
+  genre?: string
+  hashtags?: string[]
   audioUrls: Array<{
     character: string
     url: string
@@ -47,6 +49,8 @@ export async function saveDraft(draft: Omit<DialogueDraft, 'draftId' | 'createdA
       userId: item.userId,
       draftId: item.draftId,
       title: item.title,
+      genre: item.genre,
+      hashtags: item.hashtags,
       status: item.status
     })
 

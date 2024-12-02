@@ -72,7 +72,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     }
   }, [result, handleError])
 
-  // Process audio and generate subtitles
   useEffect(() => {
     const processAudioAndSubtitles = async () => {
       if (processingRef.current) return
@@ -80,7 +79,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
 
       try {
         setStatus('Processing audio')
-        // Process audio
         const segments: AudioSegmentInfo[] = result.audioUrls.map(audio => ({
           url: audio.url,
           startTime: 0,
@@ -89,24 +87,26 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
         }))
 
         const audioMerger = getAudioMerger(mergerProgress => {
-          setProgress(Math.floor(Number(mergerProgress.progress) / 2)) // First 50% for audio processing
+          setProgress(Math.floor(Number(mergerProgress.progress) / 2))
         })
 
         const audioBlob = await audioMerger.mergeAudioSegments(segments, 'preview')
         const url = URL.createObjectURL(audioBlob)
         setAudioUrl(url)
 
-        // Generate subtitles using AssemblyAI
+        const characterNames = segments.map(segment => segment.character)
+
         setStatus('Generating subtitles')
         const assemblyAI = getAudioProcessor()
         const transcription = await assemblyAI.generateSubtitles(
           url,
           { 
             speakerDetection: true,
-            wordTimestamps: true 
+            wordTimestamps: true,
+            speakerNames: characterNames
           },
           subtitleProgress => {
-            setProgress(50 + Math.floor(subtitleProgress / 2)) // Last 50% for subtitle generation
+            setProgress(50 + Math.floor(subtitleProgress / 2))
           }
         )
 
@@ -117,8 +117,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
         })
 
         setTranscriptionResult(transcription)
-        
-        // Save to drafts after successful processing
         await saveToDrafts(transcription)
 
       } catch (error) {
@@ -137,7 +135,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     }
   }, [result, handleError, saveToDrafts])
 
-  // Update subtitles based on current time
   useEffect(() => {
     if (!transcriptionResult?.subtitles?.length) {
       console.log('No subtitles available in transcription result')
@@ -153,12 +150,10 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       const time = audioRef.current?.currentTime || 0
       console.log('Current time:', time)
 
-      // Find current subtitle
       const current = transcriptionResult.subtitles.find(
         (sub: any) => time >= sub.start && time <= sub.end
       )
 
-      // Find next subtitle
       const currentIndex = current ? transcriptionResult.subtitles.indexOf(current) : -1
       const next = currentIndex > -1 ? transcriptionResult.subtitles[currentIndex + 1] : null
 
@@ -172,7 +167,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       setNextSubtitle(next || null)
     }
 
-    // Update immediately and then on time updates
     updateSubtitles()
 
     const audio = audioRef.current
@@ -217,24 +211,28 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   }
 
   return (
-    <div className="p-4 bg-gray-100 rounded-lg shadow-sm">
-      <div className="flex flex-col space-y-3">
-        <div className="flex items-center space-x-4">
-          <PlayButton isPlaying={isPlaying} onClick={togglePlayback} />
-          <ProgressBar 
-            progress={progress}
-            duration={result.metadata.totalDuration}
-            currentTime={currentTime}
-            onSeek={handleSeek}
-          />
-          <div className="text-sm text-gray-600 min-w-[70px] tabular-nums">
-            {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(result.metadata.totalDuration)}
+    <div className="bg-gray-100 rounded-lg shadow-sm">
+      <div className="flex flex-col">
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex items-center space-x-4 h-12">
+            <PlayButton isPlaying={isPlaying} onClick={togglePlayback} />
+            <ProgressBar 
+              progress={progress}
+              duration={result.metadata.totalDuration}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+            />
+            <div className="text-sm text-gray-600 min-w-[70px] tabular-nums">
+              {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(result.metadata.totalDuration)}
+            </div>
           </div>
         </div>
-        <SubtitleDisplay 
-          currentSubtitle={currentSubtitle}
-          nextSubtitle={nextSubtitle}
-        />
+        <div className="p-2">
+          <SubtitleDisplay 
+            currentSubtitle={currentSubtitle}
+            nextSubtitle={nextSubtitle}
+          />
+        </div>
       </div>
       <audio
         ref={audioRef}
@@ -247,5 +245,4 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   )
 }
 
-// Optimization: Prevent unnecessary re-renders of the main component
 export default memo(AudioPreview)
