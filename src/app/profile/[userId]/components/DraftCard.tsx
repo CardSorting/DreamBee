@@ -1,5 +1,7 @@
 import { DialogueDraft } from '@/utils/dynamodb/dialogue-drafts'
 import { TimeFormatter } from '@/app/components/dialogue/utils/TimeFormatter'
+import DraftAudioPreview from '@/app/components/dialogue/DraftAudioPreview'
+import { useState } from 'react'
 
 interface DraftCardProps {
   draft: DialogueDraft
@@ -8,6 +10,7 @@ interface DraftCardProps {
 }
 
 export function DraftCard({ draft, onPublish, onDelete }: DraftCardProps) {
+  const [audioError, setAudioError] = useState<string | null>(null)
   const formattedDate = new Date(draft.createdAt).toLocaleDateString()
   const duration = draft.metadata.totalDuration
   const formattedDuration = TimeFormatter.formatTime(duration)
@@ -30,6 +33,18 @@ export function DraftCard({ draft, onPublish, onDelete }: DraftCardProps) {
         <span>Created: {formattedDate}</span>
         <span>Duration: {formattedDuration}</span>
         <span>Speakers: {draft.metadata.speakers.length}</span>
+      </div>
+
+      <div className="mt-4">
+        <DraftAudioPreview 
+          draft={draft}
+          onError={(error) => setAudioError(error)}
+        />
+        {audioError && (
+          <div className="mt-2 text-red-500 text-sm">
+            Error playing audio: {audioError}
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end mt-4 space-x-2">
