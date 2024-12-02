@@ -26,7 +26,10 @@ export default function FeedPage() {
       setIsLoading(true)
       setError(null)
       const response = await fetch(`/api/feed?genre=${selectedGenre}`)
-      if (!response.ok) throw new Error('Failed to load dialogues')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.error || 'Failed to load dialogues')
+      }
       const data = await response.json()
       setDialogues(data.dialogues || [])
 
@@ -43,8 +46,9 @@ export default function FeedPage() {
         setUserReactions(reactions)
       }
     } catch (err) {
-      setError('Failed to load dialogues')
-      console.error(err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load dialogues'
+      setError(errorMessage)
+      console.error('Error loading dialogues:', err)
     } finally {
       setIsLoading(false)
     }
@@ -129,10 +133,9 @@ export default function FeedPage() {
       })
       
       if (!response.ok) {
-        throw new Error(`Failed to ${action} dialogue`)
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.error || `Failed to ${action} dialogue`)
       }
-
-      // No need to refresh the entire feed
     } catch (err) {
       console.error(`Error ${action}ing dialogue:`, err)
       // Revert optimistic update on error
@@ -158,12 +161,14 @@ export default function FeedPage() {
         body: JSON.stringify({ content })
       })
       if (!response.ok) {
-        throw new Error('Failed to add comment')
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.error || 'Failed to add comment')
       }
       await loadDialogues() // Reload for comments since we need the new comment data
     } catch (err) {
       console.error('Error adding comment:', err)
-      setError('Failed to add comment')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to add comment'
+      setError(errorMessage)
       setTimeout(() => setError(null), 3000)
     } finally {
       setActionInProgress(null)

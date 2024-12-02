@@ -1,21 +1,28 @@
 import { BaseItem } from '../types'
 
 export interface UserProfile extends BaseItem {
-  type: 'USER_PROFILE'
+  pk: string // USER#userId
+  sk: string // PROFILE#userId
+  type: 'PROFILE'
   userId: string
-  username?: string // Made optional since we have fallbacks
-  userTag?: string // Made optional since we check for existence
+  username?: string
+  firstName?: string
+  lastName?: string
+  userTag?: string
   bio?: string
   avatarUrl?: string
   isSuspended?: boolean
-  stats?: { // Made optional since we provide defaults
+  stats?: {
     publishedCount: number
     likesCount: number // likes given
+    dislikesCount: number
     favoritesCount: number
     followersCount: number
     followingCount: number
     totalLikesReceived: number // likes received on their content
   }
+  createdAt: string
+  updatedAt: string
 }
 
 export interface UserInteraction extends BaseItem {

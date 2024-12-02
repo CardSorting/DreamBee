@@ -33,14 +33,14 @@ async function deleteTableIfExists(tableName) {
   }
 }
 
-async function createUserReactionsTable() {
+async function createUserProfilesTable() {
   try {
-    const tableName = 'UserReactions'
+    const tableName = 'UserProfiles'
     
     // Delete existing table to update schema
     await deleteTableIfExists(tableName)
 
-    console.log('Creating UserReactions table...')
+    console.log('Creating UserProfiles table...')
     const params = {
       TableName: tableName,
       KeySchema: [
@@ -59,13 +59,13 @@ async function createUserReactionsTable() {
 
     const command = new CreateTableCommand(params)
     await client.send(command)
-    console.log('UserReactions table created successfully')
+    console.log('UserProfiles table created successfully')
   } catch (error) {
-    console.error('Error creating UserReactions table:', error)
+    console.error('Error creating UserProfiles table:', error)
     throw error
   }
 }
 
-createUserReactionsTable()
+createUserProfilesTable()
   .then(() => console.log('Setup complete'))
   .catch(console.error)

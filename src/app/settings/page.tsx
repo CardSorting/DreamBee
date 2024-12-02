@@ -24,12 +24,25 @@ export default function SettingsPage() {
         if (response.ok) {
           const data = await response.json()
           const { profile } = data
-          const [firstName, lastName] = profile.username.split(' ')
+          
+          // Get first and last name from either profile or user object
+          let firstName = ''
+          let lastName = ''
+          
+          if (profile.username) {
+            const nameParts = profile.username.split(' ')
+            firstName = nameParts[0] || ''
+            lastName = nameParts[1] || ''
+          } else if (user.firstName && user.lastName) {
+            firstName = user.firstName
+            lastName = user.lastName
+          }
+
           setProfile({
             firstName,
             lastName,
             bio: profile.bio || '',
-            avatarUrl: profile.avatarUrl || ''
+            avatarUrl: profile.avatarUrl || user.imageUrl || ''
           })
         }
       } catch (error) {
@@ -40,7 +53,7 @@ export default function SettingsPage() {
     }
 
     fetchProfile()
-  }, [user?.id])
+  }, [user?.id, user?.firstName, user?.lastName, user?.imageUrl])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,7 +66,10 @@ export default function SettingsPage() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(profile)
+        body: JSON.stringify({
+          ...profile,
+          username: `${profile.firstName} ${profile.lastName}`.trim()
+        })
       })
 
       if (!response.ok) {

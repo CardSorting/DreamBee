@@ -3,154 +3,11 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/nextjs'
 import Link from 'next/link'
-import { UserProfile, UserPublishedDialogue } from '../../../utils/dynamodb/types/user-profile'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-
-interface ProfileTabProps {
-  userId: string
-}
-
-function PublishedTab({ userId }: ProfileTabProps) {
-  const [dialogues, setDialogues] = useState<UserPublishedDialogue[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const fetchPublished = async () => {
-      try {
-        setIsLoading(true)
-        setError(null)
-        const response = await fetch(`/api/profile/${userId}/published`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch published dialogues')
-        }
-        const data = await response.json()
-        setDialogues(data.dialogues || [])
-      } catch (error) {
-        console.error('Error fetching published dialogues:', error)
-        setError('Failed to load published dialogues')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchPublished()
-  }, [userId])
-
-  if (isLoading) {
-    return <div className="flex justify-center py-8">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-    </div>
-  }
-
-  if (error) {
-    return <div className="text-center py-8 text-red-500">{error}</div>
-  }
-
-  if (!dialogues || dialogues.length === 0) {
-    return <div className="text-center py-8 text-gray-500">
-      No published dialogues
-    </div>
-  }
-
-  return (
-    <div className="space-y-4">
-      {dialogues.map((dialogue) => (
-        <div key={dialogue.dialogueId} className="bg-white rounded-lg shadow p-4">
-          <h3 className="text-lg font-semibold">{dialogue.title}</h3>
-          <p className="text-gray-600 mt-1">{dialogue.description}</p>
-          <div className="flex gap-2 mt-2">
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
-              {dialogue.genre}
-            </span>
-            {dialogue.hashtags?.map((tag) => (
-              <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
-                #{tag}
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-4 mt-4 text-sm text-gray-500">
-            <span>❤️ {dialogue.stats?.likes || 0}</span>
-            <span>👎 {dialogue.stats?.dislikes || 0}</span>
-            <span>⭐ {dialogue.stats?.favorites || 0}</span>
-            <span>💬 {dialogue.stats?.comments || 0}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function FavoritesTab({ userId }: ProfileTabProps) {
-  const [dialogues, setDialogues] = useState<UserPublishedDialogue[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const fetchFavorites = async () => {
-      try {
-        setIsLoading(true)
-        setError(null)
-        const response = await fetch(`/api/profile/${userId}/favorites`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch favorite dialogues')
-        }
-        const data = await response.json()
-        setDialogues(data.dialogues || [])
-      } catch (error) {
-        console.error('Error fetching favorites:', error)
-        setError('Failed to load favorite dialogues')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchFavorites()
-  }, [userId])
-
-  if (isLoading) {
-    return <div className="flex justify-center py-8">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-    </div>
-  }
-
-  if (error) {
-    return <div className="text-center py-8 text-red-500">{error}</div>
-  }
-
-  if (!dialogues || dialogues.length === 0) {
-    return <div className="text-center py-8 text-gray-500">
-      No favorite dialogues
-    </div>
-  }
-
-  return (
-    <div className="space-y-4">
-      {dialogues.map((dialogue) => (
-        <div key={dialogue.dialogueId} className="bg-white rounded-lg shadow p-4">
-          <h3 className="text-lg font-semibold">{dialogue.title}</h3>
-          <p className="text-gray-600 mt-1">{dialogue.description}</p>
-          <div className="flex gap-2 mt-2">
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
-              {dialogue.genre}
-            </span>
-            {dialogue.hashtags?.map((tag) => (
-              <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
-                #{tag}
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-4 mt-4 text-sm text-gray-500">
-            <span>❤️ {dialogue.stats?.likes || 0}</span>
-            <span>👎 {dialogue.stats?.dislikes || 0}</span>
-            <span>⭐ {dialogue.stats?.favorites || 0}</span>
-            <span>💬 {dialogue.stats?.comments || 0}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
+import { UserProfile } from '../../../utils/dynamodb/types/user-profile'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs'
+import { LoadingSpinner } from './components/LoadingSpinner'
+import { PublishedTab } from './components/PublishedTab'
+import { FavoritesTab } from './components/FavoritesTab'
 
 interface ProfileClientProps {
   userId: string
@@ -160,8 +17,8 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
   const { user } = useUser()
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isFollowing, setIsFollowing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isFollowing, setIsFollowing] = useState(false)
   const isOwner = user?.id === userId
 
   useEffect(() => {
@@ -203,13 +60,15 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
       }
     } catch (error) {
       console.error('Error following user:', error)
+      setError('Failed to follow user')
+      setTimeout(() => setError(null), 3000)
     }
   }
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex justify-center items-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <LoadingSpinner />
       </div>
     )
   }
@@ -241,9 +100,21 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
     )
   }
 
-  // Get display name or fallback
-  const displayName = profile.username || user?.username || 'User';
-  const firstLetter = displayName.charAt(0).toUpperCase();
+  // Get display name with proper fallbacks
+  let displayName = profile.username
+  if (!displayName && profile.firstName) {
+    displayName = profile.lastName 
+      ? `${profile.firstName} ${profile.lastName}` 
+      : profile.firstName
+  }
+  if (!displayName && isOwner && user) {
+    displayName = user.fullName || user.username || user.firstName || 'User'
+  }
+  if (!displayName) {
+    displayName = 'User'
+  }
+
+  const firstLetter = displayName.charAt(0).toUpperCase()
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -281,9 +152,9 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
           )}
           <div className="flex items-center gap-6">
             <div className="relative">
-              {profile.avatarUrl ? (
+              {profile.avatarUrl || (isOwner && user?.imageUrl) ? (
                 <img
-                  src={profile.avatarUrl}
+                  src={profile.avatarUrl || user?.imageUrl}
                   alt={displayName}
                   className="w-24 h-24 rounded-full"
                 />
@@ -298,7 +169,6 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
             <div className="flex-1">
               <div className="flex items-center gap-4">
                 <h1 className="text-2xl font-bold text-gray-900">{displayName}</h1>
-                {profile.userTag && <span className="text-gray-500">{profile.userTag}</span>}
                 {!isOwner && (
                   <button
                     onClick={handleFollow}
@@ -321,16 +191,20 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
                   <div className="font-medium">{profile.stats?.publishedCount || 0}</div>
                 </div>
                 <div>
+                  <div className="text-sm text-gray-500">Likes Given</div>
+                  <div className="font-medium">{profile.stats?.likesCount || 0}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Favorites</div>
+                  <div className="font-medium">{profile.stats?.favoritesCount || 0}</div>
+                </div>
+                <div>
                   <div className="text-sm text-gray-500">Followers</div>
                   <div className="font-medium">{profile.stats?.followersCount || 0}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Following</div>
                   <div className="font-medium">{profile.stats?.followingCount || 0}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">Total Likes</div>
-                  <div className="font-medium">{profile.stats?.totalLikesReceived || 0}</div>
                 </div>
               </div>
             </div>

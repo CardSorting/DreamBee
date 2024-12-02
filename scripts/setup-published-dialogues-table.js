@@ -1,5 +1,5 @@
 require('dotenv').config({ path: '.env.local' })
-const { DynamoDBClient, CreateTableCommand, DescribeTableCommand } = require('@aws-sdk/client-dynamodb')
+const { DynamoDBClient, CreateTableCommand, DescribeTableCommand, DeleteTableCommand } = require('@aws-sdk/client-dynamodb')
 
 // Function to validate AWS credentials
 function validateAWSCredentials() {
@@ -51,6 +51,17 @@ async function tableExists(client, tableName) {
   }
 }
 
+async function deleteTableIfExists(client, tableName) {
+  const exists = await tableExists(client, tableName)
+  if (exists) {
+    console.log(`[DynamoDB] Deleting existing ${tableName} table...`)
+    const command = new DeleteTableCommand({ TableName: tableName })
+    await client.send(command)
+    console.log('[DynamoDB] Waiting for table deletion...')
+    await new Promise(resolve => setTimeout(resolve, 10000)) // Wait for table deletion
+  }
+}
+
 async function createPublishedDialoguesTable() {
   console.log('[DynamoDB] Initializing client...')
   const credentials = validateAWSCredentials()
@@ -72,31 +83,42 @@ async function createPublishedDialoguesTable() {
   })
 
   try {
-    // Check if table exists
-    const exists = await tableExists(client, 'PublishedDialogues')
-    if (exists) {
-      console.log('[DynamoDB] PublishedDialogues table already exists')
-      return
-    }
+    // Delete existing table to update schema
+    await deleteTableIfExists(client, 'PublishedDialogues')
 
     console.log('[DynamoDB] Creating PublishedDialogues table...')
     const params = {
       TableName: 'PublishedDialogues',
       KeySchema: [
-        { AttributeName: 'pk', KeyType: 'HASH' },  // USER#userId
-        { AttributeName: 'sk', KeyType: 'RANGE' }  // DIALOGUE#dialogueId
+        { AttributeName: 'pk', KeyType: 'HASH' },
+        { AttributeName: 'sk', KeyType: 'RANGE' }
       ],
       AttributeDefinitions: [
         { AttributeName: 'pk', AttributeType: 'S' },
         { AttributeName: 'sk', AttributeType: 'S' },
         { AttributeName: 'genre', AttributeType: 'S' },
-        { AttributeName: 'createdAt', AttributeType: 'S' }
+        { AttributeName: 'createdAt', AttributeType: 'S' },
+        { AttributeName: 'userId', AttributeType: 'S' }
       ],
       GlobalSecondaryIndexes: [
         {
           IndexName: 'GenreIndex',
           KeySchema: [
             { AttributeName: 'genre', KeyType: 'HASH' },
+            { AttributeName: 'createdAt', KeyType: 'RANGE' }
+          ],
+          Projection: {
+            ProjectionType: 'ALL'
+          },
+          ProvisionedThroughput: {
+            ReadCapacityUnits: 5,
+            WriteCapacityUnits: 5
+          }
+        },
+        {
+          IndexName: 'UserIdIndex',
+          KeySchema: [
+            { AttributeName: 'userId', KeyType: 'HASH' },
             { AttributeName: 'createdAt', KeyType: 'RANGE' }
           ],
           Projection: {
@@ -118,12 +140,8 @@ async function createPublishedDialoguesTable() {
     await client.send(command)
     console.log('[DynamoDB] PublishedDialogues table created successfully')
   } catch (error) {
-    if (error.name === 'ResourceInUseException') {
-      console.log('[DynamoDB] Table already exists')
-    } else {
-      console.error('[DynamoDB] Error:', error)
-      throw error
-    }
+    console.error('[DynamoDB] Error:', error)
+    throw error
   }
 }
 
