@@ -1,227 +1,176 @@
-# AWS Lambda FFmpeg Setup Guide
+# Lambda Audio Processor Setup
 
-This guide explains how to set up the AWS Lambda function with FFmpeg layer for audio processing.
+This document describes how to set up the AWS Lambda function for audio processing using Pydub.
 
 ## Prerequisites
 
-1. AWS Account with appropriate permissions:
-   - IAM Role creation and management
-   - Lambda function creation and management
-   - Lambda layer creation and management
+1. AWS CLI installed
+2. Node.js 18.x or later
+3. Python 3.9 or later
+4. pip (Python package installer)
 
-2. Required software:
-   - Windows:
-     - Windows 10/11 with tar support (built-in)
-     - PowerShell (built-in)
-     - AWS CLI
-     - curl (built-in in recent Windows versions)
-   - Linux/Mac:
-     - curl
-     - tar
-     - zip
-     - AWS CLI
+## Environment Variables
+
+Create a `.env.lambda` file in the root directory with the following variables:
+
+```
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+AWS_BUCKET_NAME=your_s3_bucket_name
+LAMBDA_FUNCTION_NAME=audio-processor
+LAMBDA_ROLE_NAME=audio-processor-role
+LAMBDA_MEMORY_SIZE=4000
+LAMBDA_TIMEOUT=800
+REDIS_URL=your_redis_url
+REDIS_TOKEN=your_redis_token
+```
+
+Important: 
+- Each line must contain a single environment variable in KEY=VALUE format
+- Do not include any comments or empty lines
+- Do not use quotes around values
+- All variables listed above are required
+- File must be named exactly `.env.lambda`
+- AWS credentials (ACCESS_KEY_ID and SECRET_ACCESS_KEY) must have appropriate permissions
+
+## Python Dependencies
+
+The following Python packages are required:
+- pydub (0.25.1): Audio processing library
+- numpy (1.24.3): Required for audio analysis and processing
+
+These dependencies are specified in `src/lambda/audio-processor/requirements.txt` and will be automatically installed during setup.
 
 ## Setup Steps
 
-1. Configure AWS credentials:
+1. First, ensure you have the required AWS permissions by applying the role policy:
    ```bash
-   # Copy the template
-   cp .env.lambda.example .env.lambda
+   aws iam create-role --role-name audio-processor-role --assume-role-policy-document file://docs/role-policy.json
+   aws iam put-role-policy --role-name audio-processor-role --policy-name audio-processor-policy --policy-document file://docs/role-policy.json
    ```
 
-2. Edit .env.lambda with your AWS configuration:
-   ```env
-   # AWS Credentials
-   AWS_REGION=us-east-1
-   AWS_ACCESS_KEY_ID=your-access-key-id
-   AWS_SECRET_ACCESS_KEY=your-secret-access-key
-
-   # Lambda Configuration
-   LAMBDA_FUNCTION_NAME=audio-processor
-   LAMBDA_ROLE_NAME=audio-processor-role
-   LAMBDA_LAYER_NAME=ffmpeg-layer
-   LAMBDA_MEMORY_SIZE=512
-   LAMBDA_TIMEOUT=30
-   ```
-
-3. Run the setup script:
-   
-   Windows:
-   ```cmd
-   # Setup
-   scripts\setup-lambda.bat
-
-   # Cleanup (if needed)
-   scripts\setup-lambda.bat --cleanup
-   ```
-   
-   Linux/Mac:
+2. Set up the Python dependencies layer:
    ```bash
-   # Make script executable
-   chmod +x scripts/setup-lambda.sh
+   scripts/setup-python-layer.bat
+   ```
+   This script will:
+   - Load environment variables from .env.lambda
+   - Install required Python packages
+   - Package them into a Lambda layer
+   - Deploy the layer to AWS
 
-   # Setup
-   ./scripts/setup-lambda.sh
+3. Deploy the Lambda function:
+   ```bash
+   scripts/setup-lambda.bat
+   ```
+   This script will:
+   - Load environment variables from .env.lambda
+   - Package the Node.js code and dependencies
+   - Create or update the Lambda function
+   - Attach the Python layer
+   - Configure environment variables
 
-   # Cleanup (if needed)
-   ./scripts/setup-lambda.sh --cleanup
+## Architecture
+
+The audio processor uses:
+- Node.js for the main Lambda function and file handling
+- Python's pydub library for audio processing
+- Communication between Node.js and Python via python-shell
+
+The Lambda function configuration is controlled by environment variables:
+- Memory: LAMBDA_MEMORY_SIZE (default: 4000 MB)
+- Timeout: LAMBDA_TIMEOUT (default: 800 seconds)
+- Runtime: Node.js 18.x
+- Architecture: x86_64
+
+## Audio Processing Features
+
+The audio processor supports:
+1. Audio normalization
+2. Audio trimming
+3. Audio compression
+4. Silence generation
+5. File concatenation
+6. Audio comparison
+7. Audio information retrieval
+
+## Updating the Function
+
+To update the Lambda function after making changes:
+
+1. If you modified Python dependencies:
+   ```bash
+   scripts/setup-python-layer.bat
    ```
 
-## What the Scripts Do
-
-1. Environment Validation:
-   - Check required commands
-   - Validate AWS credentials
-   - Verify environment variables
-
-2. Resource Management:
-   - Check for existing resources
-   - Interactive prompts for recreation
-   - Proper IAM role cleanup
-   - Lambda function management
-
-3. FFmpeg Layer Creation:
-   - Download FFmpeg from johnvansickle.com (official static builds)
-   - Extract and prepare FFmpeg binary
-   - Create Lambda layer
-   - Configure layer settings
-
-4. Lambda Function Setup:
-   - Install dependencies
-   - Package function code
-   - Deploy with FFmpeg layer
-   - Configure memory and timeout
+2. To update the function code:
+   ```bash
+   scripts/setup-lambda.bat
+   ```
 
 ## Troubleshooting
 
-1. Download Issues:
-   ```
-   Error downloading FFmpeg
-   ```
-   Solutions:
-   - Check internet connection
-   - Verify FFmpeg URL accessibility
-   - Try running script with admin privileges
+1. AWS Credentials Issues:
+   - Check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env.lambda
+   - Verify AWS_REGION is set correctly
+   - Ensure credentials have necessary permissions
+   - Check if credentials are active and not expired
 
-2. Extraction Issues:
-   ```
-   Error extracting FFmpeg
-   ```
-   Solutions:
-   - Ensure tar is available (Windows 10/11)
-   - Check disk space
-   - Verify downloaded file integrity
+2. Environment File Issues:
+   - Verify .env.lambda exists in project root
+   - Check all required variables are present
+   - Ensure each line follows KEY=VALUE format exactly
+   - Remove any comments or empty lines
+   - Remove any quotes around values
 
-3. AWS Issues:
-   ```
-   Error: Invalid AWS credentials
-   ```
-   Solutions:
-   - Check credentials in .env.lambda
-   - Verify AWS CLI configuration
-   - Ensure proper IAM permissions
+3. Python Layer Issues:
+   - Check if the layer was created: `aws lambda list-layers`
+   - Verify Python version compatibility (3.9)
+   - Check CloudWatch logs for import errors
 
-## Resource Management
+4. Lambda Function Issues:
+   - Memory issues: Adjust LAMBDA_MEMORY_SIZE if needed
+   - Timeout issues: Adjust LAMBDA_TIMEOUT for large files
+   - Environment variables: Check they're set correctly
 
-1. Cleanup Resources:
-   ```bash
-   # Windows
-   scripts\setup-lambda.bat --cleanup
+5. Audio Processing Issues:
+   - Check CloudWatch logs for pydub errors
+   - Verify input file formats are supported
+   - Monitor memory usage in CloudWatch metrics
 
-   # Linux/Mac
-   ./scripts/setup-lambda.sh --cleanup
-   ```
+## Supported Audio Formats
 
-2. Update Function:
-   ```bash
-   # Package updates
-   cd src/lambda/audio-processor
-   zip -r function.zip .
-   
-   # Deploy updates
-   aws lambda update-function-code \
-     --function-name audio-processor \
-     --zip-file fileb://function.zip
-   ```
+Pydub supports various audio formats including:
+- WAV
+- MP3
+- OGG
+- FLAC
+- AAC
+- M4A
+- WMA
 
-3. Update Layer:
-   ```bash
-   # Create new layer version
-   aws lambda publish-layer-version \
-     --layer-name ffmpeg-layer \
-     --description "Updated FFmpeg layer" \
-     --zip-file fileb://ffmpeg-layer.zip \
-     --compatible-runtimes nodejs18.x
-   ```
+## Error Messages
 
-## Monitoring
+Common error messages and solutions:
 
-1. View Function Logs:
-   ```bash
-   aws logs get-log-events \
-     --log-group-name /aws/lambda/audio-processor \
-     --log-stream-name $(aws logs describe-log-streams \
-       --log-group-name /aws/lambda/audio-processor \
-       --order-by LastEventTime \
-       --descending \
-       --limit 1 \
-       --query 'logStreams[0].logStreamName' \
-       --output text)
-   ```
+1. "Environment variable not set":
+   - Check .env.lambda format (KEY=VALUE)
+   - Verify all required variables are present
+   - Remove any comments or empty lines
+   - Remove any quotes around values
 
-2. Check Function Status:
-   ```bash
-   aws lambda get-function \
-     --function-name audio-processor
-   ```
+2. "Could not get AWS account ID":
+   - Check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env.lambda
+   - Verify AWS_REGION is set correctly
+   - Ensure credentials have necessary permissions
+   - Try running `aws sts get-caller-identity` to verify credentials
 
-3. Monitor Metrics:
-   ```bash
-   aws cloudwatch get-metric-statistics \
-     --namespace AWS/Lambda \
-     --metric-name Errors \
-     --dimensions Name=FunctionName,Value=audio-processor \
-     --start-time $(date -u -v-1H +"%Y-%m-%dT%H:%M:%SZ") \
-     --end-time $(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-     --period 3600 \
-     --statistics Sum
-   ```
+3. "Failed to create Lambda layer":
+   - Check Python dependencies installation
+   - Verify AWS permissions for layer creation
 
-## Security Best Practices
-
-1. Environment Variables:
-   - Keep .env.lambda secure
-   - Never commit credentials
-   - Use different credentials per environment
-
-2. IAM Permissions:
-   - Follow least privilege principle
-   - Regular permission audits
-   - Monitor role usage
-
-3. Resource Management:
-   - Clean up unused resources
-   - Regular security updates
-   - Monitor function metrics
-
-## Maintenance
-
-1. Regular Updates:
-   - Check for new FFmpeg versions
-   - Update Lambda runtime
-   - Keep dependencies current
-   - Monitor AWS advisories
-
-2. Performance Tuning:
-   - Adjust memory allocation
-   - Monitor execution times
-   - Optimize FFmpeg settings
-   - Review CloudWatch metrics
-
-3. Cost Management:
-   - Monitor function invocations
-   - Review layer versions
-   - Clean up old versions
-   - Set up cost alerts
-
-The setup process is now streamlined with better error handling and consistent FFmpeg source across platforms.
+4. "Failed to update function":
+   - Check LAMBDA_FUNCTION_NAME matches
+   - Verify LAMBDA_ROLE_NAME exists
+   - Check CloudWatch logs for details

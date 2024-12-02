@@ -111,9 +111,9 @@ echo =====================================
 aws lambda update-function-configuration ^
     --function-name "audio-processor" ^
     --timeout 900 ^
-    --memory-size 2048 ^
-    --ephemeral-storage Size=2048 ^
-    --environment "Variables={NODE_OPTIONS=--max-old-space-size=1800,TEMP_DIR=/tmp/audio-processing,FFMPEG_TIMEOUT=840000,REDIS_URL=%REDIS_URL%,REDIS_TOKEN=%REDIS_TOKEN%}" ^
+    --memory-size 3072 ^
+    --ephemeral-storage Size=4096 ^
+    --environment "Variables={NODE_OPTIONS=--max-old-space-size=2800,TEMP_DIR=/tmp/audio-processing,FFMPEG_TIMEOUT=840000,REDIS_URL=%REDIS_URL%,REDIS_TOKEN=%REDIS_TOKEN%,AWS_BUCKET_NAME=%AWS_BUCKET_NAME%,MIN_AUDIO_BITRATE=128000,MIN_SAMPLE_RATE=44100,ENABLE_AUDIO_VERIFICATION=true,ENABLE_MD5_VERIFICATION=true,ENABLE_SHA256_VERIFICATION=true,MAX_COMPRESSION_RATIO=90}" ^
     --layers "arn:aws:lambda:us-east-1:590184106837:layer:ffmpeg-layer:6" || (
     echo Error: Failed to update Lambda configuration
     cd "%~dp0"
@@ -144,7 +144,7 @@ echo Configuring concurrency...
 echo =====================================
 aws lambda put-function-concurrency ^
     --function-name "audio-processor" ^
-    --reserved-concurrent-executions 3 || (
+    --reserved-concurrent-executions 2 || (
     echo Warning: Failed to set concurrency limit
 )
 
@@ -175,14 +175,21 @@ echo.
 echo =====================================
 echo Update completed successfully!
 echo Configuration:
-echo - Memory: 2048 MB
+echo - Memory: 3072 MB
 echo - Timeout: 900 seconds (15 minutes)
-echo - Ephemeral Storage: 2048 MB
-echo - Node Options: --max-old-space-size=1800
+echo - Ephemeral Storage: 4096 MB
+echo - Node Options: --max-old-space-size=2800
 echo - FFmpeg Timeout: 840 seconds (14 minutes)
 echo - Redis URL: %REDIS_URL:~0,20%...
 echo - Redis Token: %REDIS_TOKEN:~0,8%...
-echo - Concurrent Executions: 3
+echo - AWS Bucket: %AWS_BUCKET_NAME%
+echo - Concurrent Executions: 2
+echo - Audio Verification: Enabled
+echo - MD5 Verification: Enabled
+echo - SHA256 Verification: Enabled
+echo - Min Audio Bitrate: 128 kbps
+echo - Min Sample Rate: 44.1 kHz
+echo - Max Compression Ratio: 90%%
 echo - Backup Location: %BACKUP_DIR%
 echo =====================================
 
@@ -190,24 +197,28 @@ echo =====================================
 cd "%~dp0"
 if exist "%TEMP_DIR%" rd /s /q "%TEMP_DIR%"
 
-:: Create test payload file
+:: Create test payload file with verification data
 echo Creating test payload...
 echo {^
     "test": true,^
     "conversationId": "test",^
+    "verifyIntegrity": true,^
     "segments": [^
         {^
             "url": "https://example.com/test.mp3",^
             "startTime": 0,^
             "endTime": 1,^
-            "character": "test"^
+            "character": "test",^
+            "expectedMd5": null,^
+            "expectedSize": null,^
+            "verifyQuality": true^
         }^
     ]^
 } > test-payload.json
 
 :: Verify the function works
 echo.
-echo Testing function...
+echo Testing function with data integrity checks...
 echo =====================================
 aws lambda invoke ^
     --function-name "audio-processor" ^

@@ -18,7 +18,8 @@
                 "s3:DeleteObject"
             ],
             "Resource": [
-                "arn:aws:s3:::voice-dialogue-m41joj7i-d1d8/*"
+                "arn:aws:s3:::voice-dialogue-m41joj7i-d1d8/*",
+                "arn:aws:s3:::voice-dialogue-m41joj7i-d1d8/processed/*"
             ]
         },
         {

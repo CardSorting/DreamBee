@@ -1,4 +1,5 @@
 const { Redis } = require('@upstash/redis');
+const { TaskError } = require('./errors');
 
 class RedisManager {
     constructor() {
@@ -7,60 +8,87 @@ class RedisManager {
             token: process.env.REDIS_TOKEN
         });
         this.keyPrefix = 'audio-processor:';
-        this.lockTTL = 900; // 15 minutes in seconds
+    }
+
+    // Key generators
+    getQueueKey() {
+        return `${this.keyPrefix}queue`;
     }
 
     getTaskKey(taskId) {
         return `${this.keyPrefix}task:${taskId}`;
     }
 
-    getLockKey(taskId) {
-        return `${this.keyPrefix}lock:${taskId}`;
-    }
-
     getProgressKey(taskId) {
         return `${this.keyPrefix}progress:${taskId}`;
     }
 
-    async acquireLock(taskId) {
-        const lockKey = this.getLockKey(taskId);
-        const acquired = await this.redis.set(lockKey, '1', {
-            nx: true,
-            ex: this.lockTTL
-        });
-        return acquired === 'OK';
+    getProcessingSetKey() {
+        return `${this.keyPrefix}processing`;
     }
 
-    async releaseLock(taskId) {
-        const lockKey = this.getLockKey(taskId);
-        await this.redis.del(lockKey);
+    async enqueueTask(taskId, taskData) {
+        try {
+            const queueKey = this.getQueueKey();
+            const taskKey = this.getTaskKey(taskId);
+
+            // Initialize task data
+            const initialData = {
+                id: taskId,
+                status: 'queued',
+                segments: taskData.segments,
+                totalSegments: taskData.segments.length,
+                processedSegments: 0,
+                errors: [],
+                startTime: Date.now(),
+                lastUpdated: Date.now(),
+                queuedAt: Date.now()
+            };
+
+            // Store task data
+            await this.redis.set(taskKey, JSON.stringify(initialData));
+
+            // Add to queue
+            await this.redis.lpush(queueKey, taskId);
+
+            console.log(`Task ${taskId} enqueued successfully`);
+            return initialData;
+        } catch (error) {
+            console.error('Error enqueueing task:', error);
+            throw new TaskError('Failed to enqueue task', { taskId });
+        }
     }
 
-    async initializeTask(taskId, segments) {
-        const taskKey = this.getTaskKey(taskId);
-        const progressKey = this.getProgressKey(taskId);
+    async dequeueTask() {
+        try {
+            const queueKey = this.getQueueKey();
+            const processingSetKey = this.getProcessingSetKey();
 
-        const taskData = {
-            id: taskId,
-            status: 'initializing',
-            segments: segments,
-            totalSegments: segments.length,
-            processedSegments: 0,
-            errors: [],
-            startTime: Date.now(),
-            lastUpdated: Date.now()
-        };
+            // Get next task from queue
+            const taskId = await this.redis.rpoplpush(queueKey, processingSetKey);
+            if (!taskId) {
+                return null;
+            }
 
-        await this.redis.set(taskKey, JSON.stringify(taskData));
-        await this.redis.set(progressKey, JSON.stringify({
-            currentPhase: 'initializing',
-            details: 'Task initialized',
-            progress: 0,
-            processedSegments: 0,
-            totalSegments: segments.length
-        }));
+            // Get task data
+            const taskData = await this.getTaskData(taskId);
+            if (!taskData) {
+                // Clean up orphaned task ID
+                await this.redis.lrem(processingSetKey, 1, taskId);
+                return null;
+            }
 
-        return taskData;
+            // Update task status
+            taskData.status = 'processing';
+            taskData.processingStartedAt = Date.now();
+            await this.redis.set(this.getTaskKey(taskId), JSON.stringify(taskData));
+
+            console.log(`Task ${taskId} dequeued and processing`);
+            return taskData;
+        } catch (error) {
+            console.error('Error dequeuing task:', error);
+            return null;
+        }
     }
 
     async updateTaskProgress(taskId, progress) {
@@ -83,47 +111,6 @@ class RedisManager {
             }
         } catch (error) {
             console.error('Error updating task progress:', error);
-            // Don't throw error to prevent task interruption
-        }
-    }
-
-    async markSegmentComplete(taskId, segmentIndex, result) {
-        const taskKey = this.getTaskKey(taskId);
-        const taskData = await this.getTaskData(taskId);
-
-        if (taskData) {
-            taskData.processedSegments++;
-            taskData.lastUpdated = Date.now();
-            
-            if (!taskData.processedFiles) {
-                taskData.processedFiles = [];
-            }
-            taskData.processedFiles.push({
-                index: segmentIndex,
-                path: result.path,
-                size: result.size
-            });
-
-            await this.redis.set(taskKey, JSON.stringify(taskData));
-        }
-    }
-
-    async markSegmentError(taskId, segmentIndex, error) {
-        const taskKey = this.getTaskKey(taskId);
-        const taskData = await this.getTaskData(taskId);
-
-        if (taskData) {
-            if (!taskData.errors) {
-                taskData.errors = [];
-            }
-            taskData.errors.push({
-                segmentIndex,
-                error: error.message,
-                timestamp: Date.now()
-            });
-            taskData.lastUpdated = Date.now();
-
-            await this.redis.set(taskKey, JSON.stringify(taskData));
         }
     }
 
@@ -152,6 +139,7 @@ class RedisManager {
     async completeTask(taskId, result) {
         try {
             const taskKey = this.getTaskKey(taskId);
+            const processingSetKey = this.getProcessingSetKey();
             const taskData = await this.getTaskData(taskId);
 
             if (taskData) {
@@ -161,9 +149,14 @@ class RedisManager {
                 await this.redis.set(taskKey, JSON.stringify(taskData));
             }
 
+            // Remove from processing set
+            await this.redis.lrem(processingSetKey, 1, taskId);
+
             // Keep task data for 1 hour after completion
             await this.redis.expire(taskKey, 3600);
             await this.redis.expire(this.getProgressKey(taskId), 3600);
+
+            console.log(`Task ${taskId} completed successfully`);
         } catch (error) {
             console.error('Error completing task:', error);
         }
@@ -172,6 +165,7 @@ class RedisManager {
     async failTask(taskId, error) {
         try {
             const taskKey = this.getTaskKey(taskId);
+            const processingSetKey = this.getProcessingSetKey();
             const taskData = await this.getTaskData(taskId);
 
             if (taskData) {
@@ -181,9 +175,14 @@ class RedisManager {
                 await this.redis.set(taskKey, JSON.stringify(taskData));
             }
 
+            // Remove from processing set
+            await this.redis.lrem(processingSetKey, 1, taskId);
+
             // Keep failed task data for 1 hour
             await this.redis.expire(taskKey, 3600);
             await this.redis.expire(this.getProgressKey(taskId), 3600);
+
+            console.log(`Task ${taskId} failed:`, error.message);
         } catch (error) {
             console.error('Error failing task:', error);
         }
@@ -191,9 +190,15 @@ class RedisManager {
 
     async cleanupTask(taskId) {
         try {
+            const processingSetKey = this.getProcessingSetKey();
+
+            // Remove from all possible locations
             await this.redis.del(this.getTaskKey(taskId));
             await this.redis.del(this.getProgressKey(taskId));
-            await this.redis.del(this.getLockKey(taskId));
+            await this.redis.lrem(this.getQueueKey(), 0, taskId);
+            await this.redis.lrem(processingSetKey, 0, taskId);
+
+            console.log(`Task ${taskId} cleaned up`);
         } catch (error) {
             console.error('Error cleaning up task:', error);
         }
@@ -204,7 +209,7 @@ class RedisManager {
             const taskData = await this.getTaskData(taskId);
             if (!taskData) return false;
 
-            const activeStatuses = ['initializing', 'processing', 'merging'];
+            const activeStatuses = ['queued', 'processing'];
             return activeStatuses.includes(taskData.status);
         } catch (error) {
             console.error('Error checking task status:', error);
@@ -212,28 +217,44 @@ class RedisManager {
         }
     }
 
-    async resumeTask(taskId) {
+    async getQueueLength() {
         try {
-            const taskData = await this.getTaskData(taskId);
-            if (!taskData) return null;
-
-            // Only resume tasks that were interrupted
-            if (taskData.status === 'completed' || taskData.status === 'failed') {
-                return null;
-            }
-
-            // Check if task is stale (no updates for 5 minutes)
-            const staleThreshold = 5 * 60 * 1000; // 5 minutes
-            if (Date.now() - taskData.lastUpdated > staleThreshold) {
-                taskData.status = 'resuming';
-                await this.redis.set(this.getTaskKey(taskId), JSON.stringify(taskData));
-                return taskData;
-            }
-
-            return null;
+            return await this.redis.llen(this.getQueueKey());
         } catch (error) {
-            console.error('Error resuming task:', error);
-            return null;
+            console.error('Error getting queue length:', error);
+            return 0;
+        }
+    }
+
+    async getProcessingCount() {
+        try {
+            return await this.redis.llen(this.getProcessingSetKey());
+        } catch (error) {
+            console.error('Error getting processing count:', error);
+            return 0;
+        }
+    }
+
+    async cleanupStuckTasks(maxAge = 900) { // 15 minutes default
+        try {
+            const processingSetKey = this.getProcessingSetKey();
+            const processingTasks = await this.redis.lrange(processingSetKey, 0, -1);
+
+            for (const taskId of processingTasks) {
+                const taskData = await this.getTaskData(taskId);
+                if (!taskData) {
+                    await this.redis.lrem(processingSetKey, 1, taskId);
+                    continue;
+                }
+
+                const age = Date.now() - taskData.lastUpdated;
+                if (age > maxAge * 1000) {
+                    console.log(`Found stuck task ${taskId}, age: ${age}ms`);
+                    await this.cleanupTask(taskId);
+                }
+            }
+        } catch (error) {
+            console.error('Error cleaning up stuck tasks:', error);
         }
     }
 }

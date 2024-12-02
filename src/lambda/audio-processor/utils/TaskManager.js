@@ -1,15 +1,17 @@
 const crypto = require('crypto');
+const S3RouteManager = require('./S3RouteManager');
+const { TaskError } = require('./errors');
 
 class TaskManager {
-    constructor(redis, processor) {
+    constructor(redis, processor, s3) {
         this.redis = redis;
         this.processor = processor;
+        this.s3Routes = new S3RouteManager(s3);
         this.currentTask = null;
     }
 
     generateTaskId(conversationId, segments) {
         const hash = crypto.createHash('md5');
-        // Include all segment URLs and timestamps in the hash
         const segmentData = segments.map(s => 
             `${s.url}:${s.startTime}:${s.endTime}`
         ).join('|');
@@ -22,7 +24,6 @@ class TaskManager {
             return event.conversationId;
         }
         
-        // Try to extract from first segment URL
         if (event.segments && event.segments[0] && event.segments[0].url) {
             const match = event.segments[0].url.match(/conversations\/([^\/]+)/);
             if (match) {
@@ -38,10 +39,20 @@ class TaskManager {
             const conversationId = this.extractConversationId(event);
             const taskId = this.generateTaskId(conversationId, event.segments || []);
             
+            console.log('Initializing task:', {
+                taskId,
+                conversationId,
+                segmentCount: event.segments?.length || 0
+            });
+
             // Check for existing task
             const existingTask = await this.redis.getTaskData(taskId);
             if (existingTask) {
-                console.log(`Found existing task: ${taskId}, status: ${existingTask.status}`);
+                console.log(`Found existing task: ${taskId}`, {
+                    status: existingTask.status,
+                    queuedAt: existingTask.queuedAt,
+                    elapsedTime: Date.now() - existingTask.queuedAt
+                });
                 
                 if (existingTask.status === 'completed') {
                     return {
@@ -51,10 +62,10 @@ class TaskManager {
                 }
                 
                 if (existingTask.status === 'failed') {
-                    // Clean up failed task and allow retry
+                    // Allow retry of failed tasks
                     await this.redis.cleanupTask(taskId);
                 } else {
-                    // Task is still processing
+                    // Task is queued or processing
                     return {
                         type: 'conflict',
                         taskId,
@@ -64,19 +75,11 @@ class TaskManager {
                 }
             }
 
-            // Try to acquire lock
-            const lockAcquired = await this.redis.acquireLock(taskId);
-            if (!lockAcquired) {
-                return {
-                    type: 'conflict',
-                    taskId,
-                    message: 'Task is already being processed'
-                };
-            }
+            // Enqueue new task
+            const queuedTask = await this.redis.enqueueTask(taskId, {
+                segments: event.segments || []
+            });
 
-            // Initialize task in Redis
-            await this.redis.initializeTask(taskId, event.segments || []);
-            
             this.currentTask = {
                 id: taskId,
                 conversationId,
@@ -84,13 +87,22 @@ class TaskManager {
                 startTime: Date.now()
             };
 
+            // Get queue position
+            const queueLength = await this.redis.getQueueLength();
+            const processingCount = await this.redis.getProcessingCount();
+
             return {
-                type: 'initialized',
-                taskId
+                type: 'queued',
+                taskId,
+                queuePosition: queueLength,
+                activeProcesses: processingCount
             };
         } catch (error) {
             console.error('Error initializing task:', error);
-            throw new Error(`Failed to initialize task: ${error.message}`);
+            throw new TaskError('Failed to initialize task', {
+                cause: error,
+                taskId: this.currentTask?.id
+            });
         }
     }
 
@@ -114,6 +126,50 @@ class TaskManager {
         }
     }
 
+    async handleAudioResult(result) {
+        try {
+            let uploadResult;
+            if (result.data) {
+                uploadResult = await this.s3Routes.uploadMergedAudio(
+                    this.currentTask.conversationId,
+                    this.currentTask.id,
+                    result.data,
+                    result.format || 'mp3'
+                );
+            } else if (result.path) {
+                uploadResult = await this.s3Routes.uploadMergedAudio(
+                    this.currentTask.conversationId,
+                    this.currentTask.id,
+                    result.path,
+                    result.format || 'mp3'
+                );
+            } else {
+                throw new Error('No audio data available');
+            }
+
+            const progress = await this.redis.getTaskProgress(this.currentTask.id);
+
+            return {
+                url: uploadResult.url,
+                format: result.format || 'mp3',
+                size: uploadResult.size,
+                taskId: this.currentTask.id,
+                progress
+            };
+        } catch (error) {
+            throw new TaskError('Failed to handle audio result', {
+                cause: error,
+                taskId: this.currentTask.id
+            });
+        } finally {
+            try {
+                await this.s3Routes.cleanupTempFiles(this.currentTask.conversationId);
+            } catch (cleanupError) {
+                console.error('Error cleaning up temp files:', cleanupError);
+            }
+        }
+    }
+
     async completeTask(result) {
         if (!this.currentTask) {
             console.warn('No active task to complete');
@@ -121,6 +177,10 @@ class TaskManager {
         }
 
         try {
+            if (result.data || result.path) {
+                result = await this.handleAudioResult(result);
+            }
+
             const taskResult = {
                 ...result,
                 taskId: this.currentTask.id,
@@ -165,7 +225,7 @@ class TaskManager {
         }
 
         try {
-            await this.redis.releaseLock(this.currentTask.id);
+            await this.s3Routes.cleanupTempFiles(this.currentTask.conversationId);
             this.currentTask = null;
         } catch (error) {
             console.error('Error during task cleanup:', error);
@@ -176,7 +236,7 @@ class TaskManager {
         try {
             const initResult = await this.initializeTask(event);
             
-            if (initResult.type !== 'initialized') {
+            if (initResult.type === 'completed' || initResult.type === 'conflict') {
                 return this.formatResponse(initResult);
             }
 
@@ -186,11 +246,15 @@ class TaskManager {
                     statusCode: 200,
                     body: {
                         message: 'Test successful',
-                        taskId: this.currentTask.id,
-                        redis: {
-                            url: process.env.REDIS_URL ? 'configured' : 'missing',
-                            token: process.env.REDIS_TOKEN ? 'configured' : 'missing'
-                        }
+                        environment: {
+                            redis: {
+                                url: process.env.REDIS_URL ? 'configured' : 'missing',
+                                token: process.env.REDIS_TOKEN ? 'configured' : 'missing'
+                            },
+                            temp: process.env.TEMP_DIR ? 'configured' : 'missing',
+                            memory: process.env.NODE_OPTIONS ? 'configured' : 'missing'
+                        },
+                        timestamp: new Date().toISOString()
                     }
                 };
             }
@@ -201,7 +265,7 @@ class TaskManager {
             // Process audio segments
             const result = await this.processor.process(event.segments);
 
-            // Mark task as complete
+            // Mark task as complete and handle audio data
             const completedResult = await this.completeTask(result);
 
             return this.formatResponse({
@@ -216,9 +280,14 @@ class TaskManager {
             return {
                 statusCode: 500,
                 body: {
-                    error: error.message,
-                    details: errorData,
-                    taskId: this.currentTask?.id
+                    error: 'Failed to process audio',
+                    details: {
+                        message: error.message,
+                        details: errorData,
+                        taskId: this.currentTask?.id,
+                        conversationId: this.currentTask?.conversationId,
+                        processingTime: this.currentTask ? Date.now() - this.currentTask.startTime : 0
+                    }
                 }
             };
         } finally {
@@ -233,6 +302,16 @@ class TaskManager {
                     return {
                         statusCode: 200,
                         body: result.result
+                    };
+                case 'queued':
+                    return {
+                        statusCode: 202,
+                        body: {
+                            message: 'Task queued successfully',
+                            taskId: result.taskId,
+                            queuePosition: result.queuePosition,
+                            activeProcesses: result.activeProcesses
+                        }
                     };
                 case 'conflict':
                     return {

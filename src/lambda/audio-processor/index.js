@@ -1,181 +1,183 @@
-require('dotenv').config();
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
-const { promisify } = require('util');
-
-const FFmpegManager = require('./utils/FFmpegManager');
-const FileManager = require('./utils/FileManager');
-const S3Manager = require('./utils/S3Manager');
-const AudioProcessor = require('./utils/AudioProcessor');
 const RedisManager = require('./utils/RedisManager');
 const TaskManager = require('./utils/TaskManager');
-const { ProcessingError } = require('./utils/errors');
+const AudioProcessor = require('./utils/AudioProcessor');
+const FileManager = require('./utils/FileManager');
+const PydubManager = require('./utils/PydubManager');
+const S3Manager = require('./utils/S3Manager');
+const { TaskError } = require('./utils/errors');
 
-const readFile = promisify(fs.readFile);
-const stat = promisify(fs.stat);
+// Initialize managers
+const redis = new RedisManager();
+const fileManager = new FileManager(process.env.TEMP_DIR || '/tmp/audio-processing');
+const pydub = new PydubManager();
+const s3 = new S3Manager(process.env.AWS_BUCKET_NAME);
+const processor = new AudioProcessor(fileManager, pydub);
+const taskManager = new TaskManager(redis, processor, s3);
 
-// Constants
-const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5MB
-const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // 100MB
-const S3_BUCKET = process.env.AWS_BUCKET_NAME;
+// Cleanup interval (5 minutes)
+const CLEANUP_INTERVAL = 5 * 60 * 1000;
+let lastCleanup = 0;
 
-class ProcessingManager {
-    constructor(event) {
-        this.event = event;
-        this.tempDir = path.join(os.tmpdir(), 'audio-processing');
-        this.fileManager = null;
-        this.s3 = null;
-        this.processor = null;
-        this.redis = null;
-        this.taskManager = null;
-    }
+exports.handler = async (event, context) => {
+    console.log('Received event:', JSON.stringify(event, null, 2));
 
-    async initialize() {
-        try {
-            console.log('Initializing processing manager');
-            
-            // Initialize managers
-            this.fileManager = new FileManager(this.tempDir);
-            await this.fileManager.initialize();
-
-            const ffmpeg = new FFmpegManager();
-            await ffmpeg.initialize();
-
-            this.s3 = new S3Manager(S3_BUCKET);
-            this.processor = new AudioProcessor(this.fileManager, ffmpeg);
-            this.redis = new RedisManager();
-            this.taskManager = new TaskManager(this.redis, this.processor);
-            
-            console.log('Initialization complete');
-        } catch (error) {
-            console.error('Initialization failed:', error);
-            throw new ProcessingError('Failed to initialize processing manager', { cause: error });
-        }
-    }
-
-    async cleanup() {
-        console.log('Starting cleanup process');
-        
-        try {
-            // Clean up resources
-            if (this.fileManager) {
-                await this.fileManager.cleanup();
-                console.log('File cleanup completed');
-            }
-
-            // Clean up task
-            if (this.taskManager) {
-                await this.taskManager.cleanup();
-                console.log('Task cleanup completed');
-            }
-
-            // Force garbage collection if available
-            if (global.gc) {
-                global.gc();
-            }
-        } catch (error) {
-            console.error('Cleanup error:', error);
-        }
-    }
-
-    async process() {
-        try {
-            console.log('Starting processing with event:', JSON.stringify(this.event, null, 2));
-
-            // Initialize managers
-            await this.initialize();
-
-            // Process through task manager
-            const result = await this.taskManager.processTask(this.event);
-            
-            // Ensure response is properly formatted
-            return this.formatResponse(result);
-
-        } catch (error) {
-            console.error('Error in Lambda handler:', error);
-            return this.formatError(error);
-        } finally {
-            await this.cleanup();
-        }
-    }
-
-    formatResponse(result) {
-        try {
-            // Ensure result has proper structure
-            if (!result || typeof result !== 'object') {
-                throw new Error('Invalid result format');
-            }
-
-            // Ensure statusCode is present and valid
-            if (!result.statusCode || typeof result.statusCode !== 'number') {
-                result = {
-                    statusCode: 200,
-                    body: result
-                };
-            }
-
-            // Ensure body is properly serialized
-            if (result.body && typeof result.body === 'object') {
-                result.body = JSON.stringify(result.body);
-            }
-
-            return result;
-        } catch (error) {
-            console.error('Error formatting response:', error);
-            return this.formatError(error);
-        }
-    }
-
-    formatError(error) {
-        const errorResponse = {
-            statusCode: error.statusCode || 500,
-            body: JSON.stringify({
-                error: error instanceof ProcessingError ? error.message : 'Internal server error',
-                details: error instanceof ProcessingError ? error.details : error.message,
-                taskId: this.taskManager?.currentTask?.id,
-                timestamp: new Date().toISOString()
-            })
-        };
-
-        return errorResponse;
-    }
-}
-
-exports.handler = async (event) => {
     try {
-        // Handle test events
+        // Initialize file system and pydub
+        await fileManager.initialize();
+        await pydub.initialize();
+
+        // Run periodic cleanup of stuck tasks
+        const now = Date.now();
+        if (now - lastCleanup > CLEANUP_INTERVAL) {
+            await redis.cleanupStuckTasks();
+            lastCleanup = now;
+        }
+
+        // Handle test event
         if (event.test) {
             return {
                 statusCode: 200,
-                body: JSON.stringify({
+                body: {
                     message: 'Test successful',
                     environment: {
                         redis: {
                             url: process.env.REDIS_URL ? 'configured' : 'missing',
                             token: process.env.REDIS_TOKEN ? 'configured' : 'missing'
                         },
-                        ffmpeg: process.env.FFMPEG_TIMEOUT ? 'configured' : 'missing',
                         temp: process.env.TEMP_DIR ? 'configured' : 'missing',
                         memory: process.env.NODE_OPTIONS ? 'configured' : 'missing'
                     },
                     timestamp: new Date().toISOString()
-                })
+                }
             };
         }
 
-        const manager = new ProcessingManager(event);
-        return await manager.process();
+        // Check queue status
+        const queueLength = await redis.getQueueLength();
+        const processingCount = await redis.getProcessingCount();
+        const maxConcurrent = 2;
+
+        // Initialize task
+        const initResult = await taskManager.initializeTask(event);
+        
+        // If task is already completed, return the result
+        if (initResult.type === 'completed') {
+            return {
+                statusCode: 200,
+                body: initResult.result
+            };
+        }
+
+        // If task is already being processed, return conflict
+        if (initResult.type === 'conflict') {
+            return {
+                statusCode: 409,
+                body: {
+                    message: 'Task is already being processed',
+                    taskId: initResult.taskId,
+                    status: initResult.status,
+                    progress: initResult.progress
+                }
+            };
+        }
+
+        // If we're at capacity, queue the task
+        if (processingCount >= maxConcurrent) {
+            return {
+                statusCode: 202,
+                body: {
+                    message: 'Task queued successfully',
+                    taskId: initResult.taskId,
+                    queuePosition: queueLength,
+                    activeProcesses: processingCount
+                }
+            };
+        }
+
+        // Try to get a task from the queue
+        let taskToProcess = await redis.dequeueTask();
+
+        // If no task in queue and we have capacity, process the incoming task
+        if (!taskToProcess) {
+            console.log('No queued tasks, processing incoming task');
+            return await taskManager.processTask(event);
+        }
+
+        // Process the dequeued task
+        console.log('Processing dequeued task:', {
+            taskId: taskToProcess.id,
+            segmentCount: taskToProcess.segments?.length || 0,
+            queueLength,
+            processingCount
+        });
+        
+        const result = await taskManager.processTask({
+            ...event,
+            segments: taskToProcess.segments,
+            conversationId: taskToProcess.conversationId
+        });
+
+        return result;
+
     } catch (error) {
-        console.error('Unhandled error in Lambda handler:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({
-                error: 'Unhandled error in Lambda handler',
-                message: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            })
+        console.error('Error in Lambda handler:', error);
+
+        // Get detailed error information
+        const errorDetails = {
+            message: error.message,
+            name: error.name,
+            phase: error.phase,
+            details: error.details || {},
+            stack: error.stack,
+            timestamp: new Date().toISOString(),
+            taskId: error.details?.taskId,
+            conversationId: error.details?.conversationId,
+            processingTime: error.details?.processingTime,
+            progress: error.details?.progress
         };
+
+        // Log detailed error information
+        console.error('Detailed error information:', JSON.stringify(errorDetails, null, 2));
+
+        // Determine if error is retryable
+        const isRetryable = error instanceof TaskError && error.details?.retryable;
+        
+        return {
+            statusCode: isRetryable ? 503 : 500,
+            body: {
+                error: 'Failed to process audio',
+                details: errorDetails,
+                retryable: isRetryable
+            }
+        };
+    } finally {
+        try {
+            // Cleanup temporary files
+            await fileManager.cleanup();
+        } catch (error) {
+            console.error('Error during cleanup:', error);
+        }
     }
 };
+
+// Handle Lambda container shutdown
+process.on('SIGTERM', async () => {
+    console.log('Received SIGTERM, cleaning up...');
+    try {
+        await fileManager.cleanup();
+    } catch (error) {
+        console.error('Error during shutdown cleanup:', error);
+    }
+    process.exit(0);
+});
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught exception:', error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled rejection at:', promise, 'reason:', reason);
+    process.exit(1);
+});

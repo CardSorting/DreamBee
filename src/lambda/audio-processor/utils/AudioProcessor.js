@@ -2,15 +2,16 @@ const path = require('path');
 const { AudioProcessingError } = require('./errors');
 const AudioMerger = require('./AudioMerger');
 const StreamingMerger = require('./StreamingMerger');
+const PydubManager = require('./PydubManager');
 
 class AudioProcessor {
-    constructor(fileManager, ffmpegManager) {
+    constructor(fileManager) {
         this.fileManager = fileManager;
-        this.ffmpeg = ffmpegManager;
-        this.merger = new AudioMerger(fileManager, ffmpegManager);
-        this.streamingMerger = new StreamingMerger(fileManager, ffmpegManager);
+        this.pydub = new PydubManager();
+        this.merger = new AudioMerger(fileManager, this.pydub);
+        this.streamingMerger = new StreamingMerger(fileManager, this.pydub);
         this.LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // 100MB
-        this.onProgress = null; // Progress callback function
+        this.onProgress = null;
         this.resetState();
     }
 
@@ -61,15 +62,27 @@ class AudioProcessor {
             } catch (error) {
                 lastError = error;
                 console.error(`Error processing segment ${index} (Attempt ${attempt}/${maxRetries}):`, error);
-                this.errors.push({
+                
+                // Enhanced error logging
+                const errorDetails = {
                     segment: index,
                     attempt,
                     error: error.message,
-                    timestamp: Date.now()
-                });
+                    timestamp: Date.now(),
+                    details: error.details || {},
+                    url: segment.url ? segment.url.substring(0, segment.url.indexOf('?')) : 'unknown',
+                    phase: error.phase || 'unknown',
+                    cause: error.cause ? {
+                        name: error.cause.name,
+                        message: error.cause.message,
+                        code: error.cause.code
+                    } : {}
+                };
+                
+                console.log('Detailed error information:', errorDetails);
+                this.errors.push(errorDetails);
                 this.retries++;
                 
-                // Wait before retrying (exponential backoff)
                 if (attempt < maxRetries) {
                     const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
                     await new Promise(resolve => setTimeout(resolve, delay));
@@ -77,7 +90,12 @@ class AudioProcessor {
             }
         }
         
-        throw lastError;
+        throw new AudioProcessingError(`Failed to process segment ${index} after ${maxRetries} attempts`, {
+            segmentIndex: index,
+            lastError,
+            attempts: maxRetries,
+            errors: this.errors.filter(e => e.segment === index)
+        });
     }
 
     async processSegment(segment, index) {
@@ -86,32 +104,84 @@ class AudioProcessor {
         const outputPath = this.fileManager.getPath(`segment_${index}.wav`);
 
         try {
-            // Download and verify with timeout
-            await Promise.race([
-                this.fileManager.downloadFile(segment.url, inputPath),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Download timeout')), 30000))
-            ]);
+            console.log(`Processing segment ${index}:`, {
+                url: segment.url ? segment.url.substring(0, segment.url.indexOf('?')) : 'unknown',
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                character: segment.character
+            });
+
+            // Download with detailed error handling
+            try {
+                await Promise.race([
+                    this.fileManager.downloadFile(segment.url, inputPath),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Download timeout')), 30000))
+                ]);
+            } catch (error) {
+                throw new AudioProcessingError('Failed to download segment', {
+                    phase: 'download',
+                    cause: error,
+                    url: segment.url ? segment.url.substring(0, segment.url.indexOf('?')) : 'unknown'
+                });
+            }
             
-            const inputStats = await this.fileManager.verifyFile(inputPath);
-            this.totalSize += inputStats.size;
+            // Verify downloaded file
+            try {
+                const inputStats = await this.fileManager.verifyFile(inputPath);
+                this.totalSize += inputStats.size;
+                console.log(`Downloaded segment ${index}:`, {
+                    size: inputStats.size,
+                    path: inputPath
+                });
+            } catch (error) {
+                throw new AudioProcessingError('Failed to verify downloaded file', {
+                    phase: 'verify-download',
+                    cause: error
+                });
+            }
 
             // Normalize audio
-            await this.ffmpeg.normalizeAudio(inputPath, normalizedPath);
-            await this.fileManager.verifyFile(normalizedPath);
-            await this.fileManager.deleteFile(inputPath); // Clean up early
+            try {
+                await this.pydub.normalizeAudio(inputPath, normalizedPath);
+                await this.fileManager.verifyFile(normalizedPath);
+                await this.fileManager.deleteFile(inputPath);
+                console.log(`Normalized segment ${index}`);
+            } catch (error) {
+                throw new AudioProcessingError('Failed to normalize audio', {
+                    phase: 'normalize',
+                    cause: error
+                });
+            }
 
-            // Trim to segment bounds
-            await this.ffmpeg.trimAudio(normalizedPath, outputPath, segment.startTime, segment.endTime);
-            const stats = await this.fileManager.verifyFile(outputPath);
-            await this.fileManager.deleteFile(normalizedPath); // Clean up early
-            
-            this.processedSegments++;
-            this.processedSize += stats.size;
-            
-            return {
-                path: outputPath,
-                size: stats.size
-            };
+            // Trim audio
+            try {
+                await this.pydub.trimAudio(normalizedPath, outputPath, segment.startTime, segment.endTime);
+                const stats = await this.fileManager.verifyFile(outputPath);
+                await this.fileManager.deleteFile(normalizedPath);
+                
+                this.processedSegments++;
+                this.processedSize += stats.size;
+                
+                console.log(`Trimmed segment ${index}:`, {
+                    size: stats.size,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime
+                });
+                
+                return {
+                    path: outputPath,
+                    size: stats.size
+                };
+            } catch (error) {
+                throw new AudioProcessingError('Failed to trim audio', {
+                    phase: 'trim',
+                    cause: error,
+                    timing: {
+                        start: segment.startTime,
+                        end: segment.endTime
+                    }
+                });
+            }
         } catch (error) {
             // Clean up on error
             try {
@@ -122,30 +192,24 @@ class AudioProcessor {
                 console.error('Error cleaning up files:', cleanupError);
             }
 
-            throw new AudioProcessingError(
-                `Failed to process segment ${index}`,
-                { segmentIndex: index, cause: error }
-            );
+            throw error;
         }
     }
 
     async processBatch(segments, startIndex) {
         this.updateProgress('batch-processing', `Batch starting at ${startIndex}`);
         
-        // Process segments with retry mechanism
         const results = [];
         for (let i = 0; i < segments.length; i++) {
             try {
                 const result = await this.processSegmentWithRetry(segments[i], startIndex + i);
                 results.push(result);
                 
-                // Force garbage collection if available
                 if (global.gc) {
                     global.gc();
                 }
             } catch (error) {
                 console.error(`Fatal error processing segment ${startIndex + i}:`, error);
-                // Clean up any processed files before throwing
                 for (const result of results) {
                     await this.fileManager.deleteFile(result.path);
                 }
@@ -161,7 +225,6 @@ class AudioProcessor {
         let totalSize = 0;
 
         try {
-            // Determine batch size based on segment count and total duration
             const totalDuration = segments.reduce((sum, seg) => sum + (seg.endTime - seg.startTime), 0);
             const batchSize = totalDuration > 300 ? 2 : (segments.length > 20 ? 3 : 5);
             console.log(`Using batch size of ${batchSize} for total duration ${totalDuration}s`);
@@ -172,7 +235,6 @@ class AudioProcessor {
                 
                 const batchResults = await this.processBatch(batch, i);
                 
-                // Track total size and collect file paths
                 for (const result of batchResults) {
                     totalSize += result.size;
                     processedFiles.push(result.path);
@@ -183,7 +245,6 @@ class AudioProcessor {
                     Math.round((i + batch.length) / segments.length * 100)
                 );
 
-                // Force garbage collection if available
                 if (global.gc) {
                     global.gc();
                 }
@@ -191,7 +252,6 @@ class AudioProcessor {
 
             return { processedFiles, totalSize };
         } catch (error) {
-            // Clean up any processed files on error
             for (const filePath of processedFiles) {
                 await this.fileManager.deleteFile(filePath);
             }
@@ -203,19 +263,15 @@ class AudioProcessor {
         this.updateProgress('merging', 'Starting merge process');
 
         try {
-            // Always use streaming merger for consistency and better memory handling
             this.updateProgress('merging', 'Using streaming merger');
             const outputPath = this.fileManager.getPath('merged_output.wav');
             await this.streamingMerger.streamingMerge(processedFiles, outputPath);
             
-            // Compress using streaming
             const finalPath = this.fileManager.getPath('final_output.mp3');
-            await this.streamingMerger.compressStream(outputPath, finalPath);
+            await this.pydub.compressAudio(outputPath, finalPath);
             
-            // Clean up intermediate file
             await this.fileManager.deleteFile(outputPath);
 
-            // For large files, return path instead of loading into memory
             if (totalSize > this.LARGE_FILE_THRESHOLD) {
                 return {
                     path: finalPath,
@@ -239,17 +295,21 @@ class AudioProcessor {
 
     async process(segments) {
         try {
-            // Reset state
             this.resetState();
             this.totalSegments = segments.length;
 
+            await this.pydub.initialize();
             this.updateProgress('initializing', 'Starting audio processing');
+            console.log('Processing segments:', segments.map(s => ({
+                url: s.url ? s.url.substring(0, s.url.indexOf('?')) : 'unknown',
+                startTime: s.startTime,
+                endTime: s.endTime,
+                character: s.character
+            })));
 
-            // Process all segments in batches
             this.updateProgress('processing-segments', 'Starting segment processing');
             const { processedFiles, totalSize } = await this.processSegmentsInBatches(segments);
 
-            // Merge all processed files
             const result = await this.mergeFiles(segments, processedFiles, totalSize);
 
             this.updateProgress('complete', 'Audio processing completed', 100);

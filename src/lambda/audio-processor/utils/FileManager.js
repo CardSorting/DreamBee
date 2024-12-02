@@ -13,19 +13,55 @@ const readFile = promisify(fs.readFile);
 const rmdir = promisify(fs.rmdir);
 const unlink = promisify(fs.unlink);
 const readdir = promisify(fs.readdir);
+const chmod = promisify(fs.chmod);
 
 class FileManager {
     constructor(tempDir) {
-        this.tempDir = tempDir;
-        this.managedFiles = new Set(); // Track files for cleanup
+        this.tempDir = tempDir.startsWith('/tmp') ? tempDir : path.join('/tmp', path.basename(tempDir));
+        this.managedFiles = new Set();
     }
 
     async initialize() {
         try {
-            await mkdir(this.tempDir, { recursive: true });
-            console.log('Created temp directory:', this.tempDir);
+            console.log('Initializing FileManager with temp directory:', this.tempDir);
+
+            try {
+                await access('/tmp', fs.constants.W_OK);
+                console.log('/tmp directory is writable');
+            } catch (error) {
+                console.error('Error accessing /tmp directory:', error);
+                throw new FileSystemError('Cannot access /tmp directory', { cause: error });
+            }
+
+            await mkdir(this.tempDir, { 
+                recursive: true,
+                mode: 0o755
+            });
+            
+            await chmod(this.tempDir, 0o755);
+            
+            const testFile = path.join(this.tempDir, '.test');
+            await writeFile(testFile, 'test');
+            await unlink(testFile);
+            
+            console.log('Successfully initialized temp directory:', this.tempDir);
+            
+            const contents = await readdir(this.tempDir);
+            console.log('Temp directory contents:', contents);
+            
+            const stats = await stat(this.tempDir);
+            console.log('Temp directory stats:', {
+                mode: stats.mode.toString(8),
+                uid: stats.uid,
+                gid: stats.gid,
+                size: stats.size
+            });
         } catch (error) {
-            throw new FileSystemError('Failed to create temp directory', { cause: error });
+            console.error('Failed to initialize temp directory:', error);
+            throw new FileSystemError('Failed to initialize temp directory', { 
+                path: this.tempDir,
+                cause: error
+            });
         }
     }
 
@@ -34,59 +70,109 @@ class FileManager {
             console.log(`Downloading file from ${urlString} to ${outputPath}`);
             
             const handleDownload = (downloadUrl) => {
-                const parsedUrl = new URL(downloadUrl);
-                const options = {
-                    hostname: parsedUrl.hostname,
-                    path: parsedUrl.pathname + parsedUrl.search,
-                    method: 'GET',
-                    timeout: 30000,
-                    headers: {
-                        'User-Agent': 'AWS-Lambda-Function',
-                        'Accept': '*/*'
-                    }
-                };
+                try {
+                    const parsedUrl = new URL(downloadUrl);
+                    const options = {
+                        hostname: parsedUrl.hostname,
+                        path: parsedUrl.pathname + parsedUrl.search,
+                        method: 'GET',
+                        timeout: 30000,
+                        headers: {
+                            'User-Agent': 'AWS-Lambda-Function',
+                            'Accept': '*/*'
+                        },
+                        rejectUnauthorized: true // Enforce SSL verification
+                    };
 
-                const request = https.get(options, (response) => {
-                    if (response.statusCode === 301 || response.statusCode === 302) {
-                        console.log(`Following redirect to: ${response.headers.location}`);
-                        handleDownload(response.headers.location);
-                        return;
-                    }
-
-                    if (response.statusCode !== 200) {
-                        reject(new NetworkError(
-                            `Failed to download file: ${response.statusCode} - ${response.statusMessage}`,
-                            { statusCode: response.statusCode, url: urlString }
-                        ));
-                        return;
-                    }
-
-                    const writeStream = fs.createWriteStream(outputPath);
-                    response.pipe(writeStream);
-
-                    writeStream.on('finish', () => {
-                        writeStream.close();
-                        this.managedFiles.add(outputPath);
-                        console.log(`Successfully downloaded file to ${outputPath}`);
-                        resolve();
+                    console.log('Download options:', {
+                        hostname: options.hostname,
+                        path: options.path.substring(0, 100) + '...' // Truncate for logging
                     });
 
-                    writeStream.on('error', (err) => {
-                        fs.unlink(outputPath).catch(console.error);
-                        console.error(`Error writing file: ${err}`);
-                        reject(new FileSystemError('Error writing downloaded file', { cause: err }));
+                    const request = https.get(options, (response) => {
+                        if (response.statusCode === 301 || response.statusCode === 302) {
+                            console.log(`Following redirect to: ${response.headers.location}`);
+                            handleDownload(response.headers.location);
+                            return;
+                        }
+
+                        if (response.statusCode !== 200) {
+                            reject(new NetworkError(
+                                `Failed to download file: ${response.statusCode} - ${response.statusMessage}`,
+                                { statusCode: response.statusCode, url: urlString }
+                            ));
+                            return;
+                        }
+
+                        const contentLength = parseInt(response.headers['content-length'], 10);
+                        if (contentLength === 0) {
+                            reject(new NetworkError('Empty response from server'));
+                            return;
+                        }
+
+                        const writeStream = fs.createWriteStream(outputPath, { 
+                            mode: 0o644,
+                            flags: 'w'
+                        });
+
+                        let downloadedSize = 0;
+                        response.on('data', (chunk) => {
+                            downloadedSize += chunk.length;
+                            if (contentLength) {
+                                const progress = Math.round((downloadedSize / contentLength) * 100);
+                                if (progress % 20 === 0) { // Log every 20%
+                                    console.log(`Download progress: ${progress}%`);
+                                }
+                            }
+                        });
+
+                        writeStream.on('finish', async () => {
+                            writeStream.close();
+                            this.managedFiles.add(outputPath);
+
+                            try {
+                                const stats = await stat(outputPath);
+                                if (stats.size === 0) {
+                                    reject(new FileSystemError('Downloaded file is empty'));
+                                    return;
+                                }
+
+                                if (contentLength && stats.size !== contentLength) {
+                                    reject(new FileSystemError(
+                                        `Size mismatch: expected ${contentLength}, got ${stats.size}`
+                                    ));
+                                    return;
+                                }
+
+                                console.log(`Successfully downloaded file to ${outputPath} (${stats.size} bytes)`);
+                                resolve();
+                            } catch (error) {
+                                reject(new FileSystemError('Error verifying downloaded file', { cause: error }));
+                            }
+                        });
+
+                        writeStream.on('error', (err) => {
+                            fs.unlink(outputPath).catch(console.error);
+                            console.error(`Error writing file: ${err}`);
+                            reject(new FileSystemError('Error writing downloaded file', { cause: err }));
+                        });
+
+                        response.pipe(writeStream);
                     });
-                });
 
-                request.on('error', (err) => {
-                    console.error(`Error downloading file: ${err}`);
-                    reject(new NetworkError('Network error during download', { cause: err }));
-                });
+                    request.on('error', (err) => {
+                        console.error(`Error downloading file: ${err}`);
+                        reject(new NetworkError('Network error during download', { cause: err }));
+                    });
 
-                request.on('timeout', () => {
-                    request.destroy();
-                    reject(new NetworkError('Download timeout', { url: urlString }));
-                });
+                    request.on('timeout', () => {
+                        request.destroy();
+                        reject(new NetworkError('Download timeout', { url: urlString }));
+                    });
+                } catch (error) {
+                    console.error('Error in download process:', error);
+                    reject(new NetworkError('Failed to process download', { cause: error }));
+                }
             };
 
             handleDownload(urlString);
@@ -96,10 +182,19 @@ class FileManager {
     async verifyFile(filePath) {
         try {
             const stats = await stat(filePath);
-            console.log(`File size: ${stats.size} bytes`);
+            console.log(`File verification for ${filePath}:`, {
+                size: stats.size,
+                mode: stats.mode.toString(8),
+                uid: stats.uid,
+                gid: stats.gid
+            });
+            
             if (stats.size === 0) {
                 throw new FileSystemError('File is empty', { path: filePath });
             }
+            
+            await access(filePath, fs.constants.R_OK | fs.constants.W_OK);
+            
             return stats;
         } catch (error) {
             if (error instanceof FileSystemError) {
@@ -114,9 +209,16 @@ class FileManager {
 
     async writeFile(filePath, content) {
         try {
-            await writeFile(filePath, content);
+            const dir = path.dirname(filePath);
+            await mkdir(dir, { recursive: true, mode: 0o755 });
+            
+            await writeFile(filePath, content, { mode: 0o644 });
+            await chmod(filePath, 0o644);
+            
             this.managedFiles.add(filePath);
             console.log(`Successfully wrote file: ${filePath}`);
+            
+            await this.verifyFile(filePath);
         } catch (error) {
             throw new FileSystemError('Failed to write file', {
                 path: filePath,
@@ -144,7 +246,7 @@ class FileManager {
             this.managedFiles.delete(filePath);
             console.log(`Successfully deleted file: ${filePath}`);
         } catch (error) {
-            if (error.code !== 'ENOENT') { // Ignore if file doesn't exist
+            if (error.code !== 'ENOENT') {
                 throw new FileSystemError('Failed to delete file', {
                     path: filePath,
                     cause: error
@@ -155,6 +257,12 @@ class FileManager {
 
     getPath(...segments) {
         const filePath = path.join(this.tempDir, ...segments);
+        if (!filePath.startsWith(this.tempDir)) {
+            throw new FileSystemError('Invalid path: Must be within temp directory', {
+                path: filePath,
+                tempDir: this.tempDir
+            });
+        }
         return filePath;
     }
 
@@ -181,14 +289,12 @@ class FileManager {
         console.log('Starting cleanup...');
         
         try {
-            // First try to clean up managed files
             const managedFilesArray = Array.from(this.managedFiles);
             for (const filePath of managedFilesArray) {
                 await this.deleteFile(filePath);
             }
             this.managedFiles.clear();
 
-            // Then recursively clean up the temp directory
             if (await this.exists(this.tempDir)) {
                 const files = await readdir(this.tempDir);
                 for (const file of files) {

@@ -28,10 +28,10 @@ export interface TimestampData {
 
 export interface AudioSegment {
   character: Character
-  audio: ArrayBuffer
+  audio: Buffer  // Changed from ArrayBuffer to Buffer
   timestamps: TimestampData
-  startTime: number  // Start time in the overall conversation
-  endTime: number    // End time in the overall conversation
+  startTime: number
+  endTime: number
 }
 
 const defaultVoiceSettings: VoiceSettings = {
@@ -84,11 +84,13 @@ class ElevenLabsService {
 
       const data = await response.json() as TextToSpeechResponse
       
-      // Convert base64 to ArrayBuffer
-      const binaryString = atob(data.audio_base64)
-      const bytes = new Uint8Array(binaryString.length)
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i)
+      // Convert base64 directly to Buffer and keep it as Buffer
+      const buffer = Buffer.from(data.audio_base64, 'base64')
+      console.log(`Converted base64 to buffer: ${buffer.length} bytes`)
+
+      // Verify buffer is not empty
+      if (buffer.length === 0) {
+        throw new Error('Generated audio is empty')
       }
 
       // Calculate end time based on the last timestamp
@@ -101,16 +103,20 @@ class ElevenLabsService {
         character_end_times_seconds: data.alignment.character_end_times_seconds.map(t => t + startTime)
       }
 
+      // Log detailed information about the generated audio
       console.log(`Speech generated successfully:`)
       console.log(`- Character: ${character.name}`)
-      console.log(`- Audio size: ${bytes.length} bytes`)
+      console.log(`- Audio size: ${buffer.length} bytes`)
+      console.log(`- Base64 length: ${data.audio_base64.length} characters`)
       console.log(`- Duration: ${endTime - startTime}s`)
       console.log(`- Start time: ${startTime}s`)
       console.log(`- End time: ${endTime}s`)
+      console.log(`- First 32 bytes:`, buffer.slice(0, 32))
 
+      // Return the audio segment with the buffer directly
       return {
         character,
-        audio: bytes.buffer,
+        audio: buffer,  // Keep as Buffer, no conversion to ArrayBuffer
         timestamps: adjustedTimestamps,
         startTime,
         endTime

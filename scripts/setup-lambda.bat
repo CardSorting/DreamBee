@@ -1,171 +1,106 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: Function to cleanup resources
-if "%1"=="--cleanup" (
-    call :cleanup_resources
-    exit /b 0
-)
-
-:: Check if .env.lambda exists
+REM Load environment variables from .env.lambda file
 if not exist .env.lambda (
     echo Error: .env.lambda file not found
-    echo Please create .env.lambda with AWS credentials and Lambda configuration
-    echo See .env.lambda.example for required variables
     exit /b 1
 )
 
-:: Read and set environment variables from .env.lambda
+REM Parse .env.lambda file, skipping comments and empty lines
 for /f "usebackq tokens=1,* delims==" %%a in (".env.lambda") do (
-    if not "%%a"=="" if not "%%b"=="" (
-        set "%%a=%%b"
+    set "line=%%a"
+    if not "!line!"=="" if "!line:~0,1!" neq "#" (
+        set "key=%%a"
+        set "value=%%b"
+        set "!key!=!value!"
     )
 )
 
-:: Configuration
-set TEMP_DIR=%TEMP%\lambda-setup
-set FFMPEG_URL=https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-set ROLE_ARN=arn:aws:iam::590184106837:role/audio-processor-role
+REM Set default values for Lambda configuration
+set "LAMBDA_FUNCTION_NAME=audio-processor"
+set "LAMBDA_TIMEOUT=900"
+set "LAMBDA_MEMORY_SIZE=2048"
+set "LAMBDA_ROLE_NAME=audio-processor-role"
 
-echo Checking environment variables...
-
-:: Required variables
-set "REQUIRED_VARS=AWS_REGION AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY LAMBDA_FUNCTION_NAME"
-for %%v in (%REQUIRED_VARS%) do (
-    call :check_var %%v || exit /b 1
-)
-
-:: Set AWS CLI environment variables
-set AWS_DEFAULT_REGION=%AWS_REGION%
-
-echo Setting up AWS Lambda function for audio processing...
-
-:: Create temporary directory
-if exist "%TEMP_DIR%" rd /s /q "%TEMP_DIR%"
-mkdir "%TEMP_DIR%" || (
-    echo Error creating temporary directory
+REM Verify required environment variables
+if not defined REDIS_URL (
+    echo Error: REDIS_URL environment variable is not set in .env.lambda
     exit /b 1
 )
-mkdir "%TEMP_DIR%\ffmpeg-layer\bin" || exit /b 1
-cd "%TEMP_DIR%" || exit /b 1
-
-:: Test AWS credentials
-echo Testing AWS credentials...
-aws sts get-caller-identity > nul 2>&1
-if errorlevel 1 (
-    echo Error: Invalid AWS credentials
-    echo Please check your AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env.lambda
-    goto cleanup
-)
-
-:: Check if function exists
-aws lambda get-function --function-name "%LAMBDA_FUNCTION_NAME%" > nul 2>&1
-if not errorlevel 1 (
-    choice /C YN /M "Function %LAMBDA_FUNCTION_NAME% already exists. Delete and recreate?"
-    if errorlevel 2 goto cleanup
-    if errorlevel 1 (
-        echo Deleting existing function...
-        aws lambda delete-function --function-name "%LAMBDA_FUNCTION_NAME%"
-    )
-)
-
-:: Download FFmpeg
-echo Downloading FFmpeg...
-curl -L "%FFMPEG_URL%" -o ffmpeg.tar.xz
-if errorlevel 1 (
-    echo Error downloading FFmpeg
-    goto cleanup
-)
-
-:: Extract FFmpeg using tar
-echo Extracting FFmpeg...
-tar xf ffmpeg.tar.xz
-if errorlevel 1 (
-    echo Error extracting FFmpeg
-    goto cleanup
-)
-
-:: Copy FFmpeg binary
-echo Copying FFmpeg binary...
-for /d %%i in (ffmpeg-*-amd64-static) do (
-    copy "%%i\ffmpeg" "ffmpeg-layer\bin\ffmpeg" > nul
-    if errorlevel 1 (
-        echo Error copying FFmpeg binary
-        goto cleanup
-    )
-)
-
-:: Create layer zip
-echo Creating layer zip...
-cd ffmpeg-layer || exit /b 1
-powershell -Command "& { Add-Type -AssemblyName System.IO.Compression.FileSystem; $compressionLevel = [System.IO.Compression.CompressionLevel]::Optimal; [System.IO.Compression.ZipFile]::CreateFromDirectory('.', '..\ffmpeg-layer.zip', $compressionLevel, $false) }"
-cd .. || exit /b 1
-if errorlevel 1 (
-    echo Error creating layer zip
-    goto cleanup
-)
-
-:: Verify zip file exists
-if not exist ffmpeg-layer.zip (
-    echo Error: Failed to create ffmpeg-layer.zip
-    goto cleanup
-)
-
-:: Publish FFmpeg layer
-echo Publishing FFmpeg layer...
-for /f "tokens=* USEBACKQ" %%F in (`aws lambda publish-layer-version --layer-name "ffmpeg-layer" --description "FFmpeg layer for audio processing" --license-info "GPL" --zip-file fileb://ffmpeg-layer.zip --compatible-runtimes nodejs18.x --query "LayerVersionArn" --output text`) do set LAYER_VERSION_ARN=%%F
-if errorlevel 1 (
-    echo Error publishing layer
-    goto cleanup
-)
-
-:: Install Lambda function dependencies
-echo Installing Lambda function dependencies...
-cd "%~dp0..\src\lambda\audio-processor"
-call npm install
-if errorlevel 1 (
-    echo Error installing Lambda dependencies
-    goto cleanup
-)
-
-:: Package Lambda function
-echo Creating Lambda function package...
-powershell -Command "& { Add-Type -AssemblyName System.IO.Compression.FileSystem; $compressionLevel = [System.IO.Compression.CompressionLevel]::Optimal; [System.IO.Compression.ZipFile]::CreateFromDirectory('.', '%TEMP_DIR%\lambda-function.zip', $compressionLevel, $false) }"
-cd "%TEMP_DIR%"
-if errorlevel 1 (
-    echo Error creating function package
-    goto cleanup
-)
-
-:: Create Lambda function
-echo Creating Lambda function...
-aws lambda create-function --function-name "%LAMBDA_FUNCTION_NAME%" --runtime nodejs18.x --handler index.handler --role "%ROLE_ARN%" --layers "%LAYER_VERSION_ARN%" --timeout 30 --memory-size 512 --zip-file fileb://lambda-function.zip > function-output.json
-if errorlevel 1 (
-    echo Error creating Lambda function
-    goto cleanup
-)
-
-echo Setup completed successfully!
-echo Lambda Function created with ARN from function-output.json
-echo FFmpeg Layer ARN: %LAYER_VERSION_ARN%
-
-:cleanup
-:: Clean up
-cd "%~dp0"
-if exist "%TEMP_DIR%" rd /s /q "%TEMP_DIR%"
-exit /b 0
-
-:check_var
-if not defined %1 (
-    echo Error: %1 is not set in .env.lambda
+if not defined AWS_BUCKET_NAME (
+    echo Error: AWS_BUCKET_NAME environment variable is not set in .env.lambda
     exit /b 1
 )
-exit /b 0
+if not defined AWS_REGION (
+    echo Error: AWS_REGION environment variable is not set in .env.lambda
+    exit /b 1
+)
 
-:cleanup_resources
-echo Cleaning up AWS resources...
-aws lambda delete-function --function-name "%LAMBDA_FUNCTION_NAME%" 2>nul
-echo Cleanup complete
-exit /b 0
+REM Get AWS account ID
+for /f "tokens=* usebackq" %%a in (`aws sts get-caller-identity --query "Account" --output text`) do (
+    set AWS_ACCOUNT_ID=%%a
+)
 
-endlocal
+if not defined AWS_ACCOUNT_ID (
+    echo Error: Could not get AWS account ID. Please check your AWS credentials.
+    exit /b 1
+)
+
+REM Create deployment package directory
+if exist deployment-package rmdir /s /q deployment-package
+mkdir deployment-package
+cd deployment-package
+
+REM Copy Lambda function code
+xcopy /E /I ..\src\lambda\audio-processor .
+
+REM Install production dependencies
+call npm install --production
+
+REM Create zip file
+powershell Compress-Archive -Path * -DestinationPath function.zip -Force
+
+REM Get the latest Python layer version ARN
+aws lambda list-layer-versions --layer-name audio-processor-python --query "max_by(LayerVersions, &Version).LayerVersionArn" --output text > layer_arn.txt
+set /p PYTHON_LAYER_ARN=<layer_arn.txt
+del layer_arn.txt
+
+if not defined PYTHON_LAYER_ARN (
+    echo Error: Could not find Python layer. Please run setup-python-layer.bat first.
+    cd ..
+    rmdir /s /q deployment-package
+    exit /b 1
+)
+
+REM Set full role ARN
+set "LAMBDA_ROLE_ARN=arn:aws:iam::%AWS_ACCOUNT_ID%:role/%LAMBDA_ROLE_NAME%"
+
+REM Delete existing function if it exists
+aws lambda delete-function --function-name %LAMBDA_FUNCTION_NAME% 2>nul
+
+REM Create new Lambda function
+aws lambda create-function ^
+    --function-name %LAMBDA_FUNCTION_NAME% ^
+    --runtime nodejs18.x ^
+    --handler index.handler ^
+    --role !LAMBDA_ROLE_ARN! ^
+    --timeout %LAMBDA_TIMEOUT% ^
+    --memory-size %LAMBDA_MEMORY_SIZE% ^
+    --layers !PYTHON_LAYER_ARN! ^
+    --zip-file fileb://function.zip ^
+    --environment "Variables={REDIS_URL=!REDIS_URL!,AWS_S3_BUCKET=!AWS_BUCKET_NAME!}"
+
+if errorlevel 1 (
+    echo Error: Failed to create Lambda function
+    cd ..
+    rmdir /s /q deployment-package
+    exit /b 1
+)
+
+REM Clean up
+cd ..
+rmdir /s /q deployment-package
+
+echo Lambda setup complete
+exit /b 0

@@ -9,6 +9,61 @@ const lambdaClient = new LambdaClient({
   }
 })
 
+// Cache to prevent duplicate invocations
+const processingTasks = new Map<string, Promise<any>>();
+
+function generateTaskId(segments: any[]) {
+  return segments.map(s => 
+    `${s.url}:${s.startTime}:${s.endTime}:${s.character}`
+  ).join('|');
+}
+
+async function invokeLambda(params: any) {
+  console.log('Invoking Lambda with params:', JSON.stringify(params, null, 2))
+
+  const command = new InvokeCommand(params)
+  const { Payload, FunctionError, LogResult } = await lambdaClient.send(command)
+
+  if (FunctionError || !Payload) {
+    console.error('Lambda execution failed:', {
+      FunctionError,
+      LogResult: LogResult ? Buffer.from(LogResult, 'base64').toString() : undefined
+    })
+
+    let errorMessage = 'Lambda function error'
+    let errorDetails = {}
+    try {
+      if (Payload) {
+        const errorData = JSON.parse(new TextDecoder().decode(Payload))
+        errorMessage = errorData.body?.error || errorData.errorMessage || errorMessage
+        errorDetails = errorData.body?.details || {}
+      }
+    } catch (parseError) {
+      console.error('Error parsing Lambda error payload:', parseError)
+    }
+
+    throw new Error(JSON.stringify({
+      message: errorMessage,
+      details: errorDetails,
+      logs: LogResult ? Buffer.from(LogResult, 'base64').toString() : undefined
+    }))
+  }
+
+  const result = JSON.parse(new TextDecoder().decode(Payload))
+  console.log('Lambda returned:', result)
+
+  if (result.statusCode !== 200 && result.statusCode !== 202) {
+    console.error('Lambda returned non-200/202 status:', result)
+    throw new Error(JSON.stringify({
+      message: result.body?.error || 'Lambda processing failed',
+      details: result.body?.details || {},
+      statusCode: result.statusCode
+    }))
+  }
+
+  return result
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -30,7 +85,6 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Validate URL format
       try {
         new URL(segment.url)
       } catch (err) {
@@ -41,7 +95,6 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Validate time values
       if (typeof segment.startTime !== 'number' || typeof segment.endTime !== 'number') {
         return NextResponse.json(
           { error: 'Start time and end time must be numbers' },
@@ -57,90 +110,112 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const params = {
-      FunctionName: process.env.LAMBDA_FUNCTION_NAME || 'audio-processor',
-      InvocationType: InvocationType.RequestResponse,
-      LogType: LogType.Tail,
-      Payload: JSON.stringify({
-        segments: segments.map(segment => ({
-          url: segment.url,
-          startTime: segment.startTime,
-          endTime: segment.endTime,
-          character: segment.character,
-          previousCharacter: segment.previousCharacter
-        }))
-      })
+    const taskId = generateTaskId(segments)
+    
+    // Check if this task is already being processed
+    let taskPromise = processingTasks.get(taskId)
+    if (taskPromise) {
+      console.log('Found existing task, waiting for result...')
+      try {
+        const result = await taskPromise
+        return NextResponse.json(result)
+      } catch (error: any) {
+        // If the cached promise failed, remove it and try again
+        processingTasks.delete(taskId)
+        console.error('Cached task failed:', error)
+        
+        // Parse error details if available
+        try {
+          const errorData = JSON.parse(error.message)
+          return NextResponse.json(
+            { 
+              error: errorData.message,
+              details: errorData.details,
+              logs: errorData.logs
+            },
+            { status: errorData.statusCode || 500 }
+          )
+        } catch {
+          // If error message isn't JSON, return it directly
+          return NextResponse.json(
+            { error: error.message },
+            { status: 500 }
+          )
+        }
+      }
     }
 
-    console.log('Invoking Lambda with params:', JSON.stringify(params, null, 2))
-
-    const command = new InvokeCommand(params)
-    const { Payload, FunctionError, LogResult } = await lambdaClient.send(command)
-
-    if (FunctionError || !Payload) {
-      console.error('Lambda execution failed:', {
-        FunctionError,
-        LogResult: LogResult ? Buffer.from(LogResult, 'base64').toString() : undefined
-      })
-
-      let errorMessage = 'Lambda function error'
-      try {
-        if (Payload) {
-          const errorDetail = JSON.parse(new TextDecoder().decode(Payload))
-          errorMessage = errorDetail.errorMessage || errorDetail.body?.error || errorMessage
-        }
-      } catch (parseError) {
-        console.error('Error parsing Lambda error payload:', parseError)
+    // Create new task
+    taskPromise = (async () => {
+      const params = {
+        FunctionName: process.env.LAMBDA_FUNCTION_NAME || 'audio-processor',
+        InvocationType: InvocationType.RequestResponse,
+        LogType: LogType.Tail,
+        Payload: JSON.stringify({
+          segments: segments.map(segment => ({
+            url: segment.url,
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            character: segment.character,
+            previousCharacter: segment.previousCharacter
+          }))
+        })
       }
 
-      return NextResponse.json(
-        { 
-          error: errorMessage,
-          details: LogResult ? Buffer.from(LogResult, 'base64').toString() : undefined
-        },
-        { status: 500 }
-      )
-    }
+      const result = await invokeLambda(params)
 
-    const result = JSON.parse(new TextDecoder().decode(Payload))
-
-    if (result.statusCode !== 200) {
-      console.error('Lambda returned non-200 status:', result)
-      return NextResponse.json(
-        { 
-          error: result.body?.error || 'Lambda processing failed',
-          details: result.body?.details || result.body
-        },
-        { status: result.statusCode || 500 }
-      )
-    }
-
-    // Handle different response types
-    if (result.body.url) {
-      // Large file case - return the S3 URL
-      return NextResponse.json({
-        url: result.body.url,
-        format: result.body.format,
-        size: result.body.size,
-        isLarge: result.body.isLarge || false,
-        progress: result.body.progress
-      })
-    } else if (result.body.audioData) {
-      // Small file case - return the audio data directly
-      const audioData = Buffer.from(result.body.audioData, 'base64')
-      return new NextResponse(audioData, {
-        headers: {
-          'Content-Type': `audio/${result.body.format}`,
-          'Content-Length': audioData.length.toString(),
-          'Cache-Control': 'no-cache'
+      // Handle queued status
+      if (result.statusCode === 202) {
+        return {
+          status: 'queued',
+          taskId: result.body.taskId,
+          queuePosition: result.body.queuePosition,
+          activeProcesses: result.body.activeProcesses
         }
-      })
-    } else {
-      console.error('Invalid Lambda response format:', result)
-      return NextResponse.json(
-        { error: 'Invalid response format from Lambda' },
-        { status: 500 }
-      )
+      }
+
+      // Parse the body if it's a string
+      const responseBody = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+
+      return {
+        url: responseBody.url,
+        format: responseBody.format || 'mp3',
+        size: responseBody.size,
+        isLarge: responseBody.isLarge || false,
+        progress: responseBody.progress
+      }
+    })()
+
+    // Store the promise
+    processingTasks.set(taskId, taskPromise)
+
+    // Clean up after completion
+    taskPromise.finally(() => {
+      processingTasks.delete(taskId)
+    })
+
+    try {
+      const result = await taskPromise
+      return NextResponse.json(result)
+    } catch (error: any) {
+      // Parse error details if available
+      try {
+        const errorData = JSON.parse(error.message)
+        return NextResponse.json(
+          { 
+            error: errorData.message,
+            details: errorData.details,
+            logs: errorData.logs
+          },
+          { status: errorData.statusCode || 500 }
+        )
+      } catch {
+        // If error message isn't JSON, return it directly
+        return NextResponse.json(
+          { error: error.message },
+          { status: 500 }
+        )
+      }
     }
 
   } catch (err) {

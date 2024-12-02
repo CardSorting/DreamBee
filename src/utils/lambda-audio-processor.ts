@@ -42,6 +42,8 @@ async function fetchAudioFromUrl(url: string): Promise<Blob> {
 
 export async function processAudioWithLambda(segments: AudioSegmentInfo[]): Promise<Blob> {
   try {
+    console.log('Sending segments to Lambda:', segments)
+
     const response = await fetch('/api/audio/lambda-merge', {
       method: 'POST',
       headers: {
@@ -70,15 +72,20 @@ export async function processAudioWithLambda(segments: AudioSegmentInfo[]): Prom
     // Check if response is JSON (for S3 URL) or blob (for direct audio)
     const contentType = response.headers.get('content-type')
     if (contentType?.includes('application/json')) {
-      const result: LambdaProcessingResult = await response.json()
+      const result = await response.json()
+      console.log('Lambda response:', result)
       
-      if (!result.url) {
-        throw new LambdaProcessingError('No audio URL in response')
+      // Handle both direct URL and wrapped URL formats
+      const audioUrl = result.url || (result.body && JSON.parse(result.body).url)
+      
+      if (!audioUrl) {
+        console.error('Invalid Lambda response:', result)
+        throw new LambdaProcessingError('No audio URL in response', 500, result)
       }
 
       // Fetch audio from S3
-      console.log('Fetching large audio file from S3...')
-      return await fetchAudioFromUrl(result.url)
+      console.log('Fetching audio from S3:', audioUrl)
+      return await fetchAudioFromUrl(audioUrl)
     } else {
       // Direct blob response
       const blob = await response.blob()
@@ -88,6 +95,8 @@ export async function processAudioWithLambda(segments: AudioSegmentInfo[]): Prom
       return blob
     }
   } catch (error) {
+    console.error('Lambda processing error:', error)
+
     if (error instanceof LambdaProcessingError) {
       throw error
     }
@@ -100,7 +109,15 @@ export async function processAudioWithLambda(segments: AudioSegmentInfo[]): Prom
       )
     }
 
-    console.error('Error in Lambda audio processing:', error)
+    // If it's a JSON parsing error
+    if (error instanceof SyntaxError) {
+      throw new LambdaProcessingError(
+        'Invalid response format from Lambda service',
+        500,
+        error.message
+      )
+    }
+
     throw new LambdaProcessingError(
       error instanceof Error ? error.message : 'Unknown error in Lambda processing',
       500,
