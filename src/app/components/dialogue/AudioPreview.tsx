@@ -325,6 +325,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
           <SubtitleDisplay 
             currentSubtitle={currentSubtitle}
             nextSubtitle={null}
+            currentTime={currentTime}
           />
         </div>
       </div>

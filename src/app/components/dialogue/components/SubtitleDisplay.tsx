@@ -2,7 +2,13 @@ import { useRef, memo } from 'react'
 import { SubtitleDisplayProps } from '../utils/types'
 import { SubtitleStyleManager } from '../utils/SubtitleStyleManager'
 
-const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps) => {
+interface Word {
+  text: string
+  start: number
+  end: number
+}
+
+const SubtitleDisplay = ({ currentSubtitle, nextSubtitle, currentTime }: SubtitleDisplayProps) => {
   const styleManager = useRef(new SubtitleStyleManager())
 
   // If no current subtitle, show the next subtitle as current
@@ -28,6 +34,19 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
     )
   }
 
+  // Split text into words with timing information
+  const words: Word[] = currentSubtitle.words || currentSubtitle.text.split(' ').map((word: string, index: number, array: string[]) => {
+    // If no word-level timing, distribute evenly across subtitle duration
+    const duration = currentSubtitle.end - currentSubtitle.start
+    const wordDuration = duration / array.length
+    const start = currentSubtitle.start + (index * wordDuration)
+    return {
+      text: word,
+      start,
+      end: start + wordDuration
+    }
+  })
+
   return (
     <div className={styleManager.current.getContainerStyles()}>
       <div className={styleManager.current.getWrapperStyles()}>
@@ -36,9 +55,20 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
             {currentSubtitle.speaker || 'Speaker'}
           </div>
           <div 
-            className={`${styleManager.current.getTextStyles('current')} mt-1`}
+            className={`${styleManager.current.getTextStyles('current')} mt-1 flex flex-wrap gap-1`}
           >
-            {currentSubtitle.text || ''}
+            {words.map((word, index) => (
+              <span
+                key={`${word.text}-${index}`}
+                className={`transition-colors duration-200 ${
+                  currentTime >= word.start && currentTime <= word.end
+                    ? 'text-blue-600 font-medium'
+                    : ''
+                }`}
+              >
+                {word.text}
+              </span>
+            ))}
           </div>
         </div>
       </div>

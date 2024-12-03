@@ -69,6 +69,7 @@ export interface Subtitle {
 export interface SubtitleDisplayProps {
   currentSubtitle: Subtitle | null
   nextSubtitle: Subtitle | null
+  currentTime: number
 }
 
 export interface ProgressBarProps {
