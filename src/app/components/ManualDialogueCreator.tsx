@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CharacterVoice } from '../../utils/voice-config'
+import { CharacterVoice, PREDEFINED_VOICES } from '../../utils/voice-config'
 import { DialogueGenre } from '../../utils/dynamodb/types/published-dialogue'
 import { DialogueSession } from '../../utils/dynamodb/types'
 import { MetadataEditor } from './dialogue/MetadataEditor'
@@ -19,8 +19,8 @@ export interface DialogueTurn {
 // Default character configuration
 const defaultCharacter: CharacterVoice = {
   customName: 'Adam',
-  voiceId: 'ErXwobaYiN019PkySvjV', // Antoni voice
-  gender: 'male'
+  voiceId: PREDEFINED_VOICES.MALE_1.voiceId,
+  settings: { ...PREDEFINED_VOICES.MALE_1.settings }
 }
 
 interface InitialData {

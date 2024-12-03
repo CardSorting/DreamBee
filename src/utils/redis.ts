@@ -67,12 +67,11 @@ class RedisService {
   private initialize() {
     if (this.initialized) return
 
-    if (REDIS_CONFIG.url && REDIS_CONFIG.token) {
+    if (REDIS_CONFIG.enabled && REDIS_CONFIG.url) {
       try {
         this.client = new Redis({
           url: REDIS_CONFIG.url,
-          token: REDIS_CONFIG.token,
-          retry: REDIS_CONFIG.retry
+          token: REDIS_CONFIG.token || undefined
         })
         this.cacheManager = ChatCacheManager.getInstance(this.client)
         console.log('[Redis] Successfully initialized Redis client')
@@ -80,7 +79,7 @@ class RedisService {
         console.warn('[Redis] Failed to initialize Redis client, using fallback storage:', error)
       }
     } else {
-      console.warn('[Redis] Redis configuration missing, using fallback storage')
+      console.warn('[Redis] Redis not enabled or configuration missing, using fallback storage')
     }
 
     this.initialized = true

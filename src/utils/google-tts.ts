@@ -1,21 +1,18 @@
-import fetch from 'node-fetch'
+import * as tts from '@google-cloud/text-to-speech'
+import { protos } from '@google-cloud/text-to-speech'
 
-if (!process.env.ELEVENLABS_API_KEY) {
-  throw new Error('Missing ElevenLabs API key')
+if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  throw new Error('Missing Google Cloud credentials')
 }
 
-const API_KEY = process.env.ELEVENLABS_API_KEY
-const BASE_URL = 'https://api.elevenlabs.io/v1'
-
 export interface VoiceSettings {
-  stability: number
-  similarity_boost: number
-  style?: number
-  use_speaker_boost?: boolean
+  pitch?: number
+  speakingRate?: number
+  volumeGainDb?: number
 }
 
 export interface Character {
-  voiceId: string
+  voiceId: string  // Format: "language-code-voice-name", e.g., "en-US-Standard-A"
   name: string
   settings?: VoiceSettings
 }
@@ -28,27 +25,51 @@ export interface TimestampData {
 
 export interface AudioSegment {
   character: Character
-  audio: Buffer  // Changed from ArrayBuffer to Buffer
+  audio: Buffer
   timestamps: TimestampData
   startTime: number
   endTime: number
 }
 
 const defaultVoiceSettings: VoiceSettings = {
-  stability: 0.5,
-  similarity_boost: 0.75
+  pitch: 0,
+  speakingRate: 1.0,
+  volumeGainDb: 0
 }
 
-interface TextToSpeechResponse {
-  audio_base64: string
-  alignment: TimestampData
+// Estimate duration based on character count and speaking rate
+function estimateDuration(text: string, speakingRate: number = 1.0): number {
+  // Average speaking rate is about 150 words per minute
+  // Assuming average word length of 5 characters
+  const charactersPerSecond = (150 * 5) / 60 * speakingRate
+  return text.length / charactersPerSecond
 }
 
-class ElevenLabsService {
-  private apiKey: string
+// Generate simple timestamps based on estimated duration
+function generateSimpleTimestamps(text: string, duration: number): TimestampData {
+  const characters = text.split('')
+  const timePerChar = duration / characters.length
+  
+  return {
+    characters,
+    character_start_times_seconds: characters.map((_, i) => i * timePerChar),
+    character_end_times_seconds: characters.map((_, i) => (i + 1) * timePerChar)
+  }
+}
+
+class GoogleTTSService {
+  private client: tts.TextToSpeechClient
 
   constructor() {
-    this.apiKey = API_KEY
+    this.client = new tts.TextToSpeechClient()
+  }
+
+  private parseVoiceId(voiceId: string): { languageCode: string, name: string } {
+    const [languageCode, ...nameParts] = voiceId.split('-')
+    return {
+      languageCode: `${languageCode}-${nameParts[0]}`,
+      name: voiceId
+    }
   }
 
   async generateSpeech(
@@ -61,62 +82,63 @@ class ElevenLabsService {
       console.log(`Text length: ${text.length} characters`)
       console.log(`Start time in conversation: ${startTime}s`)
 
-      const url = `${BASE_URL}/text-to-speech/${character.voiceId}/with-timestamps`
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'xi-api-key': this.apiKey
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_multilingual_v2',
-          voice_settings: character.settings || defaultVoiceSettings,
-          output_format: 'mp3_44100_128'
-        })
-      })
+      const { languageCode, name } = this.parseVoiceId(character.voiceId)
+      const settings = { ...defaultVoiceSettings, ...character.settings }
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
+      const voice: protos.google.cloud.texttospeech.v1.IVoiceSelectionParams = {
+        languageCode,
+        name
       }
 
-      const data = await response.json() as TextToSpeechResponse
-      
-      // Convert base64 directly to Buffer and keep it as Buffer
-      const buffer = Buffer.from(data.audio_base64, 'base64')
-      console.log(`Converted base64 to buffer: ${buffer.length} bytes`)
+      const audioConfig: protos.google.cloud.texttospeech.v1.IAudioConfig = {
+        audioEncoding: 'MP3' as const,
+        pitch: settings.pitch,
+        speakingRate: settings.speakingRate,
+        volumeGainDb: settings.volumeGainDb
+      }
+
+      const [response] = await this.client.synthesizeSpeech({
+        input: { text },
+        voice,
+        audioConfig
+      })
+
+      const audioContent = response.audioContent
+      if (!audioContent) {
+        throw new Error('No audio content generated')
+      }
+
+      const buffer = Buffer.from(audioContent)
+      console.log(`Converted audio to buffer: ${buffer.length} bytes`)
 
       // Verify buffer is not empty
       if (buffer.length === 0) {
         throw new Error('Generated audio is empty')
       }
 
-      // Calculate end time based on the last timestamp
-      const endTime = startTime + Math.max(...data.alignment.character_end_times_seconds)
+      // Estimate duration and generate timestamps
+      const estimatedDuration = estimateDuration(text, settings.speakingRate)
+      const timestamps = generateSimpleTimestamps(text, estimatedDuration)
+      const endTime = startTime + estimatedDuration
 
       // Adjust timestamps to account for the start time in the conversation
       const adjustedTimestamps: TimestampData = {
-        characters: data.alignment.characters,
-        character_start_times_seconds: data.alignment.character_start_times_seconds.map(t => t + startTime),
-        character_end_times_seconds: data.alignment.character_end_times_seconds.map(t => t + startTime)
+        characters: timestamps.characters,
+        character_start_times_seconds: timestamps.character_start_times_seconds.map(t => t + startTime),
+        character_end_times_seconds: timestamps.character_end_times_seconds.map(t => t + startTime)
       }
 
       // Log detailed information about the generated audio
       console.log(`Speech generated successfully:`)
       console.log(`- Character: ${character.name}`)
       console.log(`- Audio size: ${buffer.length} bytes`)
-      console.log(`- Base64 length: ${data.audio_base64.length} characters`)
-      console.log(`- Duration: ${endTime - startTime}s`)
+      console.log(`- Estimated duration: ${estimatedDuration}s`)
       console.log(`- Start time: ${startTime}s`)
       console.log(`- End time: ${endTime}s`)
-      console.log(`- First 32 bytes:`, buffer.slice(0, 32))
 
-      // Return the audio segment with the buffer directly
       return {
         character,
-        audio: buffer,  // Keep as Buffer, no conversion to ArrayBuffer
+        audio: buffer,
         timestamps: adjustedTimestamps,
         startTime,
         endTime
@@ -128,18 +150,6 @@ class ElevenLabsService {
         error: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString()
       })
-
-      if (error instanceof Error) {
-        if (error.message.includes('quota')) {
-          throw new Error('ElevenLabs quota exceeded. Please try again later.')
-        }
-        if (error.message.includes('authorization')) {
-          throw new Error('Invalid ElevenLabs API key. Please check your configuration.')
-        }
-        if (error.message.includes('voice not found')) {
-          throw new Error(`Voice ID ${character.voiceId} not found. Please verify the voice exists.`)
-        }
-      }
 
       throw error
     }
@@ -193,19 +203,16 @@ class ElevenLabsService {
     }
   }
 
-  // Helper method to validate voice ID
+  // Helper method to validate voice
   async validateVoice(voiceId: string): Promise<boolean> {
     try {
-      const response = await fetch(`${BASE_URL}/voices/${voiceId}`, {
-        headers: {
-          'xi-api-key': this.apiKey
-        }
-      })
-      return response.ok
+      const { languageCode } = this.parseVoiceId(voiceId)
+      const [voices] = await this.client.listVoices({ languageCode })
+      return voices.voices?.some(voice => voice.name === voiceId) || false
     } catch (error) {
       return false
     }
   }
 }
 
-export const elevenLabs = new ElevenLabsService()
+export const googleTTS = new GoogleTTSService()

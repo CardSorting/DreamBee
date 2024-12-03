@@ -19,14 +19,14 @@ export function convertChatToDialogue(messages: ChatMessage[]): ExportedDialogue
   // Create default characters with proper voice IDs
   const userCharacter: CharacterVoice = {
     customName: 'Adam',
-    voiceId: PREDEFINED_VOICES.male[0].id, // ErXwobaYiN019PkySvjV (Antoni)
-    gender: 'male'
+    voiceId: PREDEFINED_VOICES.MALE_1.voiceId,
+    settings: PREDEFINED_VOICES.MALE_1.settings
   }
 
   const assistantCharacter: CharacterVoice = {
     customName: 'Sarah',
-    voiceId: PREDEFINED_VOICES.female[0].id, // EXAVITQu4vr4xnSDxMaL (Rachel)
-    gender: 'female'
+    voiceId: PREDEFINED_VOICES.FEMALE_1.voiceId,
+    settings: PREDEFINED_VOICES.FEMALE_1.settings
   }
 
   const characters = [userCharacter, assistantCharacter]

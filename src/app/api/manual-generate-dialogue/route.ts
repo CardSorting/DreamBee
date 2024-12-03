@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { elevenLabs, Character, VoiceSettings } from '../../../utils/elevenlabs'
+import { googleTTS, Character, VoiceSettings } from '../../../utils/google-tts'
 import { s3Service } from '../../../utils/s3'
 import { redisService } from '../../../utils/redis'
-import { generateSRT, generateVTT, generateTranscript } from '../../../utils/subtitles'
+import { generateSRT, generateVTT } from '../../../utils/subtitles'
 import { ConversationFlowManager } from '../../../utils/conversation-flow'
 import { CharacterVoice } from '../../../utils/voice-config'
 import { createManualDialogue } from '../../../utils/dynamodb/manual-dialogues'
@@ -25,8 +25,9 @@ if (!GOOGLE_API_KEY) {
 }
 
 const defaultVoiceSettings: VoiceSettings = {
-  stability: 0.5,
-  similarity_boost: 0.75
+  pitch: 0,
+  speakingRate: 1.0,
+  volumeGainDb: 0
 }
 
 interface DialogueTurn {
@@ -217,7 +218,7 @@ async function processDialogueChunk(
       throw new Error(`Character configuration not found for: ${line.character}`)
     }
 
-    // Create a Character object for ElevenLabs
+    // Create a Character object for Google TTS
     const character: Character = {
       voiceId: characterConfig.voiceId,
       name: characterConfig.customName,
@@ -237,7 +238,7 @@ async function processDialogueChunk(
     currentTime += flowAnalysis.timing.prePause
 
     // Generate speech with timing adjustments
-    const segment = await elevenLabs.generateSpeech(line.text, character, currentTime)
+    const segment = await googleTTS.generateSpeech(line.text, character, currentTime)
     
     // Adjust timing based on flow analysis
     segment.startTime = currentTime
@@ -250,37 +251,35 @@ async function processDialogueChunk(
     audioSegments.push(segment)
   }
 
-  // Generate transcript and subtitles
-  const transcript = generateTranscript(audioSegments)
+  // Generate subtitles
   const srtContent = generateSRT(audioSegments)
   const vttContent = generateVTT(audioSegments)
 
   // Upload all audio segments to S3
   const uploads = await s3Service.uploadMultipleAudio(audioSegments, `${dialogueId}/chunk${chunkIndex}`)
 
-  // Get signed URLs for all uploaded audio segments
-  const audioUrls = await Promise.all(
-    uploads.map(async ({ character, audioKey }) => ({
+  // Create direct URLs for all uploaded audio segments
+  const audioUrls = uploads.map(({ character, audioKey }) => {
+    const directUrl = `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
+    return {
       character,
-      url: await s3Service.getSignedUrl(audioKey),
-      directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
-    }))
-  )
+      url: directUrl,
+      directUrl
+    }
+  })
 
-  // Upload transcript and subtitle files
-  const transcriptKey = `dialogues/${dialogueId}/chunk${chunkIndex}/transcript.json`
+  // Upload subtitle files
   const srtKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.srt`
   const vttKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.vtt`
 
   await Promise.all([
-    s3Service.uploadFile(transcriptKey, JSON.stringify(transcript, null, 2), 'application/json'),
     s3Service.uploadFile(srtKey, srtContent, 'text/plain'),
     s3Service.uploadFile(vttKey, vttContent, 'text/plain')
   ])
 
   // Process with AssemblyAI
   const assemblyAI = getAudioProcessor()
-  const mergedAudioUrl = audioUrls[0].directUrl // Use the first audio URL for processing
+  const mergedAudioUrl = audioUrls[0].url // Use the first audio URL for processing
   const assemblyAiResult = await assemblyAI.generateSubtitles(
     mergedAudioUrl,
     {
@@ -304,7 +303,7 @@ async function processDialogueChunk(
     title: chunk.title,
     audioUrls,
     metadata: {
-      totalDuration: transcript.duration,
+      totalDuration: currentTime,
       speakers: chunk.characters.map(c => c.customName),
       turnCount: chunk.dialogue.length,
       chunkIndex: chunk.chunkIndex,
@@ -313,7 +312,7 @@ async function processDialogueChunk(
     transcript: {
       srt: srtContent,
       vtt: vttContent,
-      json: transcript
+      json: assemblyAiResult
     },
     assemblyAiResult
   }

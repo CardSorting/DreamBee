@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { AssemblyAI } from 'assemblyai'
+import axios from 'axios'
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY
+const ASSEMBLYAI_API_URL = 'https://api.assemblyai.com/v2'
 
 interface AssemblyAIWord {
   text: string
@@ -58,9 +60,27 @@ export async function POST(req: NextRequest) {
       apiKey: ASSEMBLYAI_API_KEY
     })
 
-    // Submit transcription request
+    // First, upload the audio file to AssemblyAI using their API directly
+    console.log('Uploading audio to AssemblyAI...')
+    const response = await axios.get(audioUrl, { responseType: 'arraybuffer' })
+    const audioData = Buffer.from(response.data)
+
+    const uploadResponse = await axios.post(`${ASSEMBLYAI_API_URL}/upload`, audioData, {
+      headers: {
+        'authorization': ASSEMBLYAI_API_KEY,
+        'content-type': 'application/octet-stream'
+      }
+    })
+
+    if (!uploadResponse.data?.upload_url) {
+      throw new Error('Failed to upload audio to AssemblyAI')
+    }
+
+    console.log('Audio uploaded successfully, starting transcription...')
+
+    // Submit transcription request with the uploaded audio URL
     const transcript = await client.transcripts.transcribe({
-      audio: audioUrl,
+      audio: uploadResponse.data.upload_url,
       speaker_labels: options?.speakerDetection,
       word_boost: ["*"],
       language_code: "en_us" // Set language to US English
@@ -104,6 +124,7 @@ export async function POST(req: NextRequest) {
       enhancedTranscript.speakers = Array.from(speakerMap.values())
     }
 
+    console.log('Transcription completed successfully')
     return NextResponse.json(enhancedTranscript)
 
   } catch (error: any) {
@@ -112,6 +133,8 @@ export async function POST(req: NextRequest) {
     let errorMessage = 'Failed to transcribe audio'
     if (error instanceof Error) {
       errorMessage = error.message
+    } else if (error.response?.data?.error) {
+      errorMessage = error.response.data.error
     }
 
     return NextResponse.json(

@@ -28,7 +28,11 @@ export interface DialogueSession {
   characters: {
     customName: string
     voiceId: string
-    gender: 'male' | 'female'
+    settings: {
+      pitch?: number
+      speakingRate?: number
+      volumeGainDb?: number
+    }
   }[]
   dialogue: {
     character: string

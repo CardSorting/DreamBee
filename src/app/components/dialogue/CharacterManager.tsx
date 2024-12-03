@@ -11,8 +11,8 @@ export function CharacterManager({ characters, onUpdateCharacters }: CharacterMa
   const addCharacter = () => {
     const newCharacter: CharacterVoice = {
       customName: `Character ${characters.length + 1}`,
-      voiceId: PREDEFINED_VOICES.male[0].id,
-      gender: 'male'
+      voiceId: PREDEFINED_VOICES.MALE_1.voiceId,
+      settings: { ...PREDEFINED_VOICES.MALE_1.settings }
     }
     onUpdateCharacters([...characters, newCharacter])
   }
@@ -21,9 +21,12 @@ export function CharacterManager({ characters, onUpdateCharacters }: CharacterMa
     const newCharacters = [...characters]
     newCharacters[index] = { ...newCharacters[index], ...updates }
     
-    // If changing gender, update voiceId to first voice of that gender
-    if (updates.gender) {
-      newCharacters[index].voiceId = PREDEFINED_VOICES[updates.gender][0].id
+    // If selecting a predefined voice, update settings too
+    if (updates.voiceId) {
+      const selectedVoice = Object.values(PREDEFINED_VOICES).find(v => v.voiceId === updates.voiceId)
+      if (selectedVoice) {
+        newCharacters[index].settings = { ...selectedVoice.settings }
+      }
     }
     
     onUpdateCharacters(newCharacters)
@@ -63,36 +66,43 @@ export function CharacterManager({ characters, onUpdateCharacters }: CharacterMa
                   placeholder="Enter character name"
                 />
               </div>
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Gender
-                  </label>
-                  <select
-                    value={character.gender}
-                    onChange={(e) => updateCharacter(index, { gender: e.target.value as 'male' | 'female' })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  >
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                  </select>
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Voice
-                  </label>
-                  <select
-                    value={character.voiceId}
-                    onChange={(e) => updateCharacter(index, { voiceId: e.target.value })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  >
-                    {PREDEFINED_VOICES[character.gender].map((voice) => (
-                      <option key={voice.id} value={voice.id}>
-                        {voice.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Voice
+                </label>
+                <select
+                  value={character.voiceId}
+                  onChange={(e) => updateCharacter(index, { voiceId: e.target.value })}
+                  className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                >
+                  <optgroup label="Male Voices">
+                    {Object.entries(PREDEFINED_VOICES)
+                      .filter(([key]) => key.startsWith('MALE'))
+                      .map(([key, voice]) => (
+                        <option key={voice.voiceId} value={voice.voiceId}>
+                          {voice.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Female Voices">
+                    {Object.entries(PREDEFINED_VOICES)
+                      .filter(([key]) => key.startsWith('FEMALE'))
+                      .map(([key, voice]) => (
+                        <option key={voice.voiceId} value={voice.voiceId}>
+                          {voice.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Neural Voices">
+                    {Object.entries(PREDEFINED_VOICES)
+                      .filter(([key]) => key.startsWith('NEURAL'))
+                      .map(([key, voice]) => (
+                        <option key={voice.voiceId} value={voice.voiceId}>
+                          {voice.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
               </div>
             </div>
             {characters.length > 1 && (

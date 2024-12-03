@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { redisService } from '@/utils/redis'
-import { elevenLabs, type Character } from '@/utils/elevenlabs'
-import { s3Service } from '@/utils/s3'
-import { mediaConvert } from '@/utils/mediaconvert'
-import { ConversationFlowManager } from '@/utils/conversation-flow'
-import { generateSRT, generateVTT, generateTranscript } from '@/utils/subtitles'
+import { redisService } from '../../../utils/redis'
+import { googleTTS, type Character } from '../../../utils/google-tts'
+import { s3Service } from '../../../utils/s3'
+import { mediaConvert } from '../../../utils/mediaconvert'
+import { ConversationFlowManager } from '../../../utils/conversation-flow'
+import { generateSRT, generateVTT } from '../../../utils/subtitles'
 
 // Check required environment variables
 if (!process.env.GOOGLE_API_KEY) {
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
       currentTime += flowAnalysis.timing.prePause
 
       // Generate speech with timing adjustments
-      const segment = await elevenLabs.generateSpeech(text, character, currentTime)
+      const segment = await googleTTS.generateSpeech(text, character, currentTime)
       
       // Adjust timing based on flow analysis
       segment.startTime = currentTime
@@ -86,8 +86,7 @@ export async function POST(req: NextRequest) {
       audioSegments.push(segment)
     }
 
-    // Generate transcript and subtitles
-    const transcript = generateTranscript(audioSegments)
+    // Generate subtitles
     const srtContent = generateSRT(audioSegments)
     const vttContent = generateVTT(audioSegments)
 
@@ -103,13 +102,11 @@ export async function POST(req: NextRequest) {
       }))
     )
 
-    // Upload transcript and subtitle files
-    const transcriptKey = `conversations/${conversationId}/transcript.json`
+    // Upload subtitle files
     const srtKey = `conversations/${conversationId}/subtitles.srt`
     const vttKey = `conversations/${conversationId}/subtitles.vtt`
 
     await Promise.all([
-      s3Service.uploadFile(transcriptKey, JSON.stringify(transcript, null, 2), 'application/json'),
       s3Service.uploadFile(srtKey, srtContent, 'text/plain'),
       s3Service.uploadFile(vttKey, vttContent, 'text/plain')
     ])
@@ -121,6 +118,9 @@ export async function POST(req: NextRequest) {
       endTime: segment.endTime,
       speaker: segment.character.name
     }))
+
+    // Get unique speakers
+    const uniqueSpeakers = Array.from(new Set(audioSegments.map(s => s.character.name)))
 
     // Cache conversation data in Redis
     await redisService.cacheGeneratedConversation({
@@ -135,12 +135,20 @@ export async function POST(req: NextRequest) {
       transcript: {
         srt: srtContent,
         vtt: vttContent,
-        json: transcript
+        json: {
+          duration: currentTime,
+          speakers: uniqueSpeakers,
+          segments: audioSegments.map(s => ({
+            speaker: s.character.name,
+            startTime: s.startTime,
+            endTime: s.endTime
+          }))
+        }
       },
       metadata: {
-        totalDuration: transcript.duration,
-        speakers: transcript.speakers,
-        turnCount: transcript.segments.length,
+        totalDuration: currentTime,
+        speakers: uniqueSpeakers,
+        turnCount: audioSegments.length,
         createdAt: Date.now()
       }
     })
@@ -155,7 +163,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       conversationId,
       audioUrls,
-      transcript,
+      metadata: {
+        totalDuration: currentTime,
+        speakers: uniqueSpeakers,
+        turnCount: audioSegments.length
+      },
       jobId
     })
   } catch (error) {
