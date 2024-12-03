@@ -2,7 +2,7 @@ import { DialogueDraft } from '@/utils/dynamodb/dialogue-drafts'
 import { TimeFormatter } from '@/app/components/dialogue/utils/TimeFormatter'
 import DraftAudioPreview from '@/app/components/dialogue/DraftAudioPreview'
 import { MetadataEditor } from '@/app/components/dialogue/MetadataEditor'
-import { DialogueGenre } from '@/utils/dynamodb/types/published-dialogue'
+import { DIALOGUE_GENRES, DialogueGenre } from '@/utils/dynamodb/types/published-dialogue'
 import { useState } from 'react'
 import axios from 'axios'
 
@@ -26,6 +26,26 @@ export function DraftCard({ draft, onPublish, onDelete }: DraftCardProps) {
   const formattedDate = new Date(draft.createdAt).toLocaleDateString()
   const duration = draft.metadata.totalDuration
   const formattedDuration = TimeFormatter.formatTime(duration)
+
+  // Convert transcript.vtt to subtitles array
+  const subtitles = draft.transcript?.vtt ? draft.transcript.vtt.split('\n\n')
+    .filter(block => block.includes('-->'))
+    .map(block => {
+      const [id, timing, ...textLines] = block.split('\n')
+      const [start, end] = timing.split(' --> ').map(time => {
+        const [h, m, s] = time.split(':').map(Number)
+        return ((h * 60 + m) * 60 + s) * 1000
+      })
+      return {
+        id,
+        start,
+        end,
+        text: textLines.join(' ')
+      }
+    }) : []
+
+  // Get audio URL from the audioUrls array
+  const audioUrl = draft.audioUrls?.[0]?.directUrl || ''
 
   const handleSave = async () => {
     try {
@@ -68,7 +88,7 @@ export function DraftCard({ draft, onPublish, onDelete }: DraftCardProps) {
                 setHashtagInput('')
               }
             }}
-            onRemoveHashtag={(tag) => setHashtags(hashtags.filter(t => t !== tag))}
+            onRemoveHashtag={(tag: string) => setHashtags(hashtags.filter(t => t !== tag))}
           />
           <div className="flex justify-end space-x-2">
             <button
@@ -143,10 +163,14 @@ export function DraftCard({ draft, onPublish, onDelete }: DraftCardProps) {
           </div>
 
           <div className="mt-4">
-            <DraftAudioPreview 
-              draft={draft}
-              onError={(error) => setAudioError(error)}
-            />
+            {audioUrl && (
+              <DraftAudioPreview 
+                audioUrl={audioUrl}
+                subtitles={subtitles}
+                duration={duration}
+                onError={(error) => setAudioError(error)}
+              />
+            )}
             {audioError && (
               <div className="mt-2 text-red-500 text-sm">
                 Error playing audio: {audioError}

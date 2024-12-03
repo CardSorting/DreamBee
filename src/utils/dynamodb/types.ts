@@ -1,3 +1,19 @@
+export const DIALOGUE_GENRES = [
+  'comedy',
+  'drama',
+  'action',
+  'romance',
+  'mystery',
+  'horror',
+  'fantasy',
+  'sci-fi',
+  'slice-of-life',
+  'educational',
+  'other'
+] as const
+
+export type DialogueGenre = typeof DIALOGUE_GENRES[number]
+
 export interface AudioSegment {
   character: string
   audioKey: string
@@ -83,7 +99,7 @@ export interface ConversationItem extends BaseItem {
     speakers: string[]
     turnCount: number
     createdAt: number
-    genre: string
+    genre: DialogueGenre
     title: string
     description: string
   }

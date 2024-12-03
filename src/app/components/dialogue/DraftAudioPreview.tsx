@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, memo } from 'react'
+import { useEffect, useState, useCallback, useRef, memo, useMemo } from 'react'
 import { TimeFormatter } from './utils/TimeFormatter'
 import { PlayButton } from './components/PlayButton'
 import { ProgressBar } from './components/ProgressBar'
@@ -19,7 +19,18 @@ export function DraftAudioPreview({ audioUrl, subtitles, duration, onError }: Dr
   const [currentSubtitle, setCurrentSubtitle] = useState<Subtitle | null>(null)
   const [nextSubtitle, setNextSubtitle] = useState<Subtitle | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
-  const sortedSubtitlesRef = useRef<Subtitle[]>(subtitles.sort((a, b) => a.start - b.start))
+  
+  const sortedSubtitles = useMemo(() => {
+    if (!subtitles?.length) return []
+    return [...subtitles].sort((a, b) => a.start - b.start)
+  }, [subtitles])
+  
+  const sortedSubtitlesRef = useRef<Subtitle[]>(sortedSubtitles)
+
+  // Keep ref in sync with sorted subtitles
+  useEffect(() => {
+    sortedSubtitlesRef.current = sortedSubtitles
+  }, [sortedSubtitles])
 
   const updateSubtitles = useCallback(() => {
     if (!sortedSubtitlesRef.current.length) return
