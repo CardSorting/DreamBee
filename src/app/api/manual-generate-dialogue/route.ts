@@ -11,8 +11,6 @@ import { chunkDialogue, validateDialogueLength } from '../../../utils/dialogue-c
 import { getAuth } from '@clerk/nextjs/server'
 import { getAudioProcessor } from '../../../utils/assemblyai'
 import { saveDraft } from '../../../utils/dynamodb/dialogue-drafts'
-import { AudioProcessor } from '../../../utils/audio-processing/audio-processor'
-import { FileManager } from '../../../utils/audio-processing/file-manager'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -272,43 +270,45 @@ async function processDialogueChunk(
     }
   })
 
-  // Initialize audio processor and file manager
-  const fileManager = new FileManager()
-  const audioProcessor = new AudioProcessor(fileManager)
-
-  // Merge audio segments with proper timing
-  const segments = audioUrls.map((audio, index) => ({
-    url: audio.directUrl,
-    startTime: audioSegments[index].startTime,
-    endTime: audioSegments[index].endTime,
-    character: audio.character
-  }))
-
-  console.log('Processing segments:', segments.map(s => ({
-    character: s.character,
-    startTime: s.startTime,
-    endTime: s.endTime
-  })))
-
-  const mergedAudioBuffer = await audioProcessor.processSegments(segments)
-  const mergedAudioKey = `${dialogueId}/chunk${chunkIndex}/merged.mp3`
-  await s3Service.uploadFile(mergedAudioKey, mergedAudioBuffer, 'audio/mpeg')
-  const mergedAudioUrl = `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${mergedAudioKey}`
-
-  // Process with AssemblyAI using the merged audio
+  // Process each segment with AssemblyAI and merge results
   const assemblyAI = getAudioProcessor()
-  const assemblyAiResult = await assemblyAI.generateSubtitles(
-    mergedAudioUrl,
-    {
-      speakerDetection: true,
-      wordTimestamps: true,
-      speakerNames: chunk.characters.map(c => c.customName)
-    }
+  const transcriptionResults = await Promise.all(
+    audioUrls.map(async (audio, index) => {
+      const result = await assemblyAI.generateSubtitles(
+        audio.directUrl,
+        {
+          speakerDetection: true,
+          wordTimestamps: true,
+          speakerNames: [chunk.dialogue[index].character]
+        }
+      )
+      return {
+        ...result,
+        startTime: audioSegments[index].startTime,
+        endTime: audioSegments[index].endTime,
+        character: chunk.dialogue[index].character
+      }
+    })
   )
 
-  // Generate subtitles from AssemblyAI result
-  const srtContent = generateAssemblyAISRT(assemblyAiResult.subtitles)
-  const vttContent = generateAssemblyAIVTT(assemblyAiResult.subtitles)
+  // Merge transcription results
+  const mergedResult = {
+    text: transcriptionResults.map(r => r.text).join(' '),
+    subtitles: transcriptionResults.flatMap(r => 
+      r.subtitles.map(sub => ({
+        ...sub,
+        start: sub.start + r.startTime * 1000,
+        end: sub.end + r.startTime * 1000,
+        speaker: r.character
+      }))
+    ).sort((a, b) => a.start - b.start),
+    speakers: chunk.characters.map(c => c.customName),
+    confidence: transcriptionResults.reduce((sum, r) => sum + r.confidence, 0) / transcriptionResults.length
+  }
+
+  // Generate subtitles from merged result
+  const srtContent = generateAssemblyAISRT(mergedResult.subtitles)
+  const vttContent = generateAssemblyAIVTT(mergedResult.subtitles)
 
   // Upload subtitle files
   const srtKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.srt`
@@ -318,7 +318,7 @@ async function processDialogueChunk(
   await Promise.all([
     s3Service.uploadFile(srtKey, srtContent, 'text/plain'),
     s3Service.uploadFile(vttKey, vttContent, 'text/plain'),
-    s3Service.uploadFile(assemblyAiKey, JSON.stringify(assemblyAiResult, null, 2), 'application/json')
+    s3Service.uploadFile(assemblyAiKey, JSON.stringify(mergedResult, null, 2), 'application/json')
   ])
 
   // Update chunk metadata
@@ -340,8 +340,8 @@ async function processDialogueChunk(
     transcript: {
       srt: srtContent,
       vtt: vttContent,
-      json: assemblyAiResult
+      json: mergedResult
     },
-    assemblyAiResult
+    assemblyAiResult: mergedResult
   }
 }
