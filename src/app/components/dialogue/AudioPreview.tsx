@@ -2,11 +2,10 @@ import { useEffect, useState, useCallback, useRef, memo } from 'react'
 import { getAudioMerger, AudioSegmentInfo } from '../../../utils/audio-merger'
 import { getAudioProcessor } from '../../../utils/assemblyai'
 import { TimeFormatter } from './utils/TimeFormatter'
-import { AudioPreviewProps } from './utils/types'
+import { AudioPreviewProps, Subtitle } from './utils/types'
 import { PlayButton } from './components/PlayButton'
 import { ProgressBar } from './components/ProgressBar'
 import SubtitleDisplay from './components/SubtitleDisplay'
-import axios from 'axios'
 
 const BASE_BUFFER_MS = 2000 // 2 second base buffer
 const LOOKAHEAD_BUFFER_MS = 4000 // 4 second lookahead
@@ -25,6 +24,30 @@ const LoadingState = memo(({ status, progress }: { status: string, progress: num
 
 LoadingState.displayName = 'LoadingState'
 
+type AssemblyAISubtitle = {
+  text: string
+  start: number
+  end: number
+  words?: Array<{
+    text: string
+    start: number
+    end: number
+    confidence: number
+    speaker?: string | null
+  }>
+  speaker?: string | null
+}
+
+// Create an empty subtitle for when no subtitle is available
+const createEmptySubtitle = (id: string): Subtitle => ({
+  id,
+  text: '',
+  start: 0,
+  end: 0,
+  speaker: 'Speaker',
+  words: []
+})
+
 export function AudioPreview({ result, onError }: AudioPreviewProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
@@ -32,21 +55,20 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   const [status, setStatus] = useState<string>('Initializing')
   const [currentTime, setCurrentTime] = useState(0)
   const [transcriptionResult, setTranscriptionResult] = useState<any>(null)
-  const [currentSubtitle, setCurrentSubtitle] = useState<any>(null)
-  const [nextSubtitle, setNextSubtitle] = useState<any>(null)
-  const [draftId, setDraftId] = useState<string | null>(null)
+  const [currentSubtitle, setCurrentSubtitle] = useState<Subtitle>(() => createEmptySubtitle('initial'))
+  const [nextSubtitle, setNextSubtitle] = useState<Subtitle | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const processingRef = useRef(false)
-  const sortedSubtitlesRef = useRef<any[]>([])
-  const lastSubtitleRef = useRef<any>(null)
-  const preloadedSubtitlesRef = useRef<any[]>([])
+  const sortedSubtitlesRef = useRef<Subtitle[]>([])
+  const lastSubtitleRef = useRef<Subtitle>(createEmptySubtitle('last'))
+  const preloadedSubtitlesRef = useRef<Subtitle[]>([])
 
   const handleError = useCallback((error: Error) => {
     console.error('Processing error:', error.message)
     onError(error.message)
   }, [onError])
 
-  const calculateDynamicBuffer = useCallback((subtitle: any) => {
+  const calculateDynamicBuffer = useCallback((subtitle: Subtitle | null) => {
     // Calculate buffer based on subtitle length
     const textLength = subtitle?.text?.length || 0
     return BASE_BUFFER_MS + (textLength * CHAR_BUFFER_MS)
@@ -74,39 +96,44 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     console.log('Preloaded subtitles:', preloadedSubtitlesRef.current.length)
 
     // First check preloaded subtitles
-    let current = preloadedSubtitlesRef.current[0]
-    if (current) {
+    let current: Subtitle = createEmptySubtitle('current')
+    if (preloadedSubtitlesRef.current[0]) {
       // Calculate dynamic buffer based on subtitle length
-      const dynamicBuffer = calculateDynamicBuffer(current)
+      const dynamicBuffer = calculateDynamicBuffer(preloadedSubtitlesRef.current[0])
       const bufferedTimeMs = timeMs + dynamicBuffer
 
       // Check if we should show this subtitle yet
-      if (bufferedTimeMs < current.start) {
-        current = null
+      if (bufferedTimeMs >= preloadedSubtitlesRef.current[0].start) {
+        current = preloadedSubtitlesRef.current[0]
       }
     }
 
     // If no subtitle found in preloaded, check all subtitles
-    if (!current) {
+    if (!current.text) {
       const dynamicBuffer = BASE_BUFFER_MS // Use base buffer for searching
       const bufferedTimeMs = timeMs + dynamicBuffer
-      current = sortedSubtitlesRef.current.find(
+      const foundSubtitle = sortedSubtitlesRef.current.find(
         sub => bufferedTimeMs >= sub.start && bufferedTimeMs <= sub.end
       )
+      if (foundSubtitle) {
+        current = foundSubtitle
+      }
     }
 
     // If no current subtitle is found:
-    if (!current) {
+    if (!current.text) {
       if (timeMs === 0 && sortedSubtitlesRef.current.length > 0) {
         // At the start, show first subtitle
-        setCurrentSubtitle(sortedSubtitlesRef.current[0])
-        lastSubtitleRef.current = sortedSubtitlesRef.current[0]
+        const firstSubtitle = sortedSubtitlesRef.current[0]
+        setCurrentSubtitle(firstSubtitle)
+        lastSubtitleRef.current = firstSubtitle
         return
       } else if (timeMs >= durationMs - 100 && sortedSubtitlesRef.current.length > 0) {
         // At the end, show last subtitle
         const lastIndex = sortedSubtitlesRef.current.length - 1
-        setCurrentSubtitle(sortedSubtitlesRef.current[lastIndex])
-        lastSubtitleRef.current = sortedSubtitlesRef.current[lastIndex]
+        const lastSubtitle = sortedSubtitlesRef.current[lastIndex]
+        setCurrentSubtitle(lastSubtitle)
+        lastSubtitleRef.current = lastSubtitle
         return
       } else if (lastSubtitleRef.current) {
         // Show the last known subtitle if no current subtitle is found
@@ -123,11 +150,12 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       totalSubtitles: sortedSubtitlesRef.current.length
     })
 
-    if (current) {
+    if (current.text) {
       lastSubtitleRef.current = current
+      setCurrentSubtitle(current)
+    } else {
+      setCurrentSubtitle(lastSubtitleRef.current)
     }
-
-    setCurrentSubtitle(current || lastSubtitleRef.current)
   }, [transcriptionResult, preloadSubtitles, calculateDynamicBuffer])
 
   const handleTimeUpdate = useCallback(() => {
@@ -139,36 +167,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       updateSubtitles()
     }
   }, [updateSubtitles])
-
-  const saveToDrafts = useCallback(async (transcription: any) => {
-    try {
-      setStatus('Saving draft')
-      console.log('Saving transcription to drafts:', {
-        title: result.title,
-        transcriptionLength: transcription.text?.length,
-        subtitleCount: transcription.subtitles?.length
-      })
-
-      const response = await axios.post('/api/dialogue/draft', {
-        title: result.title || 'Untitled Dialogue',
-        audioUrls: result.audioUrls,
-        metadata: result.metadata,
-        transcript: {
-          srt: transcription.srt || '',
-          vtt: transcription.vtt || '',
-          json: transcription
-        },
-        assemblyAiResult: transcription
-      })
-
-      console.log('Draft saved successfully:', response.data)
-      setDraftId(response.data.draftId)
-      setStatus('Ready')
-    } catch (error) {
-      console.error('Failed to save draft:', error)
-      handleError(new Error('Failed to save dialogue draft'))
-    }
-  }, [result, handleError])
 
   useEffect(() => {
     const processAudioAndSubtitles = async () => {
@@ -198,12 +196,18 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
             subtitleCount: result.assemblyAiResult.subtitles.length,
             speakers: result.assemblyAiResult.speakers
           })
-          // Sort subtitles by start time
-          sortedSubtitlesRef.current = [...result.assemblyAiResult.subtitles].sort((a, b) => a.start - b.start)
+          // Sort subtitles by start time and add unique IDs
+          const processedSubtitles: Subtitle[] = [...result.assemblyAiResult.subtitles]
+            .sort((a, b) => a.start - b.start)
+            .map((sub: AssemblyAISubtitle, index) => ({
+              ...sub,
+              id: `subtitle_${index}_${Date.now()}`
+            }))
+          sortedSubtitlesRef.current = processedSubtitles
           setTranscriptionResult(result.assemblyAiResult)
           // Initialize with first subtitle
-          if (sortedSubtitlesRef.current.length > 0) {
-            const firstSubtitle = sortedSubtitlesRef.current[0]
+          if (processedSubtitles.length > 0) {
+            const firstSubtitle = processedSubtitles[0]
             setCurrentSubtitle(firstSubtitle)
             lastSubtitleRef.current = firstSubtitle
             // Preload initial subtitles
@@ -236,18 +240,24 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
             speakers: transcription.speakers
           })
 
-          // Sort subtitles by start time
-          sortedSubtitlesRef.current = [...transcription.subtitles].sort((a, b) => a.start - b.start)
+          // Sort subtitles by start time and add unique IDs
+          const processedSubtitles: Subtitle[] = [...transcription.subtitles]
+            .sort((a, b) => a.start - b.start)
+            .map((sub: AssemblyAISubtitle, index) => ({
+              ...sub,
+              id: `subtitle_${index}_${Date.now()}`
+            }))
+          sortedSubtitlesRef.current = processedSubtitles
           setTranscriptionResult(transcription)
           // Initialize with first subtitle
-          if (sortedSubtitlesRef.current.length > 0) {
-            const firstSubtitle = sortedSubtitlesRef.current[0]
+          if (processedSubtitles.length > 0) {
+            const firstSubtitle = processedSubtitles[0]
             setCurrentSubtitle(firstSubtitle)
             lastSubtitleRef.current = firstSubtitle
             // Preload initial subtitles
             preloadedSubtitlesRef.current = preloadSubtitles(0)
           }
-          await saveToDrafts(transcription)
+          setStatus('Ready')
         }
       } catch (error) {
         handleError(error instanceof Error ? error : new Error('Unknown error'))
@@ -263,7 +273,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
         URL.revokeObjectURL(audioUrl)
       }
     }
-  }, [result, handleError, saveToDrafts, preloadSubtitles])
+  }, [result, handleError, preloadSubtitles])
 
   const togglePlayback = useCallback(() => {
     if (audioRef.current) {

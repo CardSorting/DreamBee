@@ -16,7 +16,6 @@ export interface UserProfile extends BaseItem {
     publishedCount: number
     likesCount: number // likes given
     dislikesCount: number
-    favoritesCount: number
     followersCount: number
     followingCount: number
     totalLikesReceived: number // likes received on their content
@@ -29,7 +28,7 @@ export interface UserInteraction extends BaseItem {
   type: 'USER_INTERACTION'
   userId: string
   dialogueId: string
-  interactionType: 'LIKE' | 'FAVORITE' | 'FOLLOW'
+  interactionType: 'LIKE' | 'FOLLOW'
   createdAt: string
   isPrivate: boolean
 }
@@ -43,10 +42,21 @@ export interface UserPublishedDialogue extends BaseItem {
   description: string
   genre: string
   hashtags: string[]
+  audioUrl: string
+  metadata: {
+    totalDuration: number
+    speakers: string[]
+    turnCount: number
+    createdAt: number
+  }
+  transcript: {
+    srt: string
+    vtt: string
+    json: any
+  }
   stats: {
     likes: number
     dislikes: number
-    favorites: number
     comments: number
   }
 }

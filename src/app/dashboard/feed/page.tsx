@@ -5,7 +5,7 @@ import { useUser } from '@clerk/nextjs'
 import { PublishedDialogue, DIALOGUE_GENRES, DialogueGenre } from '../../../utils/dynamodb/types/published-dialogue'
 
 interface UserReactions {
-  [dialogueId: string]: 'LIKE' | 'DISLIKE' | 'FAVORITE' | null;
+  [dialogueId: string]: 'LIKE' | 'DISLIKE' | null;
 }
 
 export default function FeedPage() {
@@ -54,7 +54,7 @@ export default function FeedPage() {
     }
   }
 
-  const handleAction = async (dialogueId: string, action: 'like' | 'dislike' | 'favorite') => {
+  const handleAction = async (dialogueId: string, action: 'like' | 'dislike') => {
     if (actionInProgress) return;
     
     try {
@@ -66,66 +66,49 @@ export default function FeedPage() {
 
       // Optimistically update UI
       const currentReaction = userReactions[dialogueId]
-      const newReaction = action === 'like' ? 'LIKE' : action === 'dislike' ? 'DISLIKE' : action === 'favorite' ? 'FAVORITE' : null
+      const newReaction = action === 'like' ? 'LIKE' : action === 'dislike' ? 'DISLIKE' : null
 
-      if (action === 'favorite') {
-        // Handle favorite toggle
-        const isFavorited = currentReaction === 'FAVORITE'
-        setUserReactions(prev => ({ ...prev, [dialogueId]: isFavorited ? null : 'FAVORITE' }))
-        setDialogues(prevDialogues => 
-          prevDialogues.map(d => {
-            if (d.dialogueId === dialogueId) {
-              return {
-                ...d,
-                favorites: d.favorites + (isFavorited ? -1 : 1)
-              }
-            }
-            return d
-          })
-        )
-      } else {
-        // Handle like/dislike
-        let likeDelta = 0
-        let dislikeDelta = 0
+      // Handle like/dislike
+      let likeDelta = 0
+      let dislikeDelta = 0
 
-        if (action === 'like') {
-          if (currentReaction === 'LIKE') {
-            likeDelta = -1
-            setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
-          } else {
-            likeDelta = 1
-            if (currentReaction === 'DISLIKE') {
-              dislikeDelta = -1
-            }
-            setUserReactions(prev => ({ ...prev, [dialogueId]: 'LIKE' }))
-          }
-        } else if (action === 'dislike') {
+      if (action === 'like') {
+        if (currentReaction === 'LIKE') {
+          likeDelta = -1
+          setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
+        } else {
+          likeDelta = 1
           if (currentReaction === 'DISLIKE') {
             dislikeDelta = -1
-            setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
-          } else {
-            dislikeDelta = 1
-            if (currentReaction === 'LIKE') {
-              likeDelta = -1
-            }
-            setUserReactions(prev => ({ ...prev, [dialogueId]: 'DISLIKE' }))
           }
+          setUserReactions(prev => ({ ...prev, [dialogueId]: 'LIKE' }))
         }
-
-        // Update local state
-        setDialogues(prevDialogues => 
-          prevDialogues.map(d => {
-            if (d.dialogueId === dialogueId) {
-              return {
-                ...d,
-                likes: d.likes + likeDelta,
-                dislikes: d.dislikes + dislikeDelta
-              }
-            }
-            return d
-          })
-        )
+      } else if (action === 'dislike') {
+        if (currentReaction === 'DISLIKE') {
+          dislikeDelta = -1
+          setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
+        } else {
+          dislikeDelta = 1
+          if (currentReaction === 'LIKE') {
+            likeDelta = -1
+          }
+          setUserReactions(prev => ({ ...prev, [dialogueId]: 'DISLIKE' }))
+        }
       }
+
+      // Update local state
+      setDialogues(prevDialogues => 
+        prevDialogues.map(d => {
+          if (d.dialogueId === dialogueId) {
+            return {
+              ...d,
+              likes: d.likes + likeDelta,
+              dislikes: d.dislikes + dislikeDelta
+            }
+          }
+          return d
+        })
+      )
 
       // Make API call
       const response = await fetch(`/api/feed/${dialogueId}/${action}`, {
@@ -287,20 +270,6 @@ export default function FeedPage() {
                   >
                     <span>👎</span>
                     <span>{dialogue.dislikes}</span>
-                  </button>
-                  <button
-                    onClick={() => handleAction(dialogue.dialogueId, 'favorite')}
-                    disabled={actionInProgress === dialogue.dialogueId}
-                    className={`flex items-center gap-1 ${
-                      userReactions[dialogue.dialogueId] === 'FAVORITE'
-                        ? 'text-yellow-600'
-                        : 'text-gray-600 hover:text-yellow-600'
-                    } ${
-                      actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
-                    }`}
-                  >
-                    <span>⭐</span>
-                    <span>{dialogue.favorites}</span>
                   </button>
                 </div>
 

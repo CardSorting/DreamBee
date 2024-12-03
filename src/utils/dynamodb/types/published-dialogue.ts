@@ -11,7 +11,6 @@ export interface PublishedDialogue extends BaseItem {
   audioUrl: string
   likes: number
   dislikes: number
-  favorites: number
   reactions: {
     [key: string]: number // e.g., { "❤️": 5, "😂": 3 }
   }

@@ -53,6 +53,7 @@ export interface AudioProgressState {
 }
 
 export interface Subtitle {
+  id?: string
   text: string
   start: number
   end: number
@@ -67,7 +68,7 @@ export interface Subtitle {
 }
 
 export interface SubtitleDisplayProps {
-  currentSubtitle: Subtitle | null
+  currentSubtitle: Subtitle
   nextSubtitle: Subtitle | null
   currentTime: number
 }

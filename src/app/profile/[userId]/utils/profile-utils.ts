@@ -7,19 +7,10 @@ export async function fetchProfile(userId: string) {
   return data.profile
 }
 
-export async function fetchPublishedDialogues(userId: string) {
-  const response = await fetch(`/api/profile/${userId}/published`)
+export async function fetchPublishedDialogues(userId: string, page = 1, limit = 10) {
+  const response = await fetch(`/api/profile/${userId}/published?page=${page}&limit=${limit}`)
   if (!response.ok) {
     throw new Error('Failed to fetch published dialogues')
-  }
-  const data = await response.json()
-  return data.dialogues || []
-}
-
-export async function fetchFavoriteDialogues(userId: string) {
-  const response = await fetch(`/api/profile/${userId}/favorites`)
-  if (!response.ok) {
-    throw new Error('Failed to fetch favorite dialogues')
   }
   const data = await response.json()
   return data.dialogues || []

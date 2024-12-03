@@ -11,11 +11,6 @@ interface Word {
 const SubtitleDisplay = ({ currentSubtitle, nextSubtitle, currentTime }: SubtitleDisplayProps) => {
   const styleManager = useRef(new SubtitleStyleManager())
 
-  // If no current subtitle, show the next subtitle as current
-  if (!currentSubtitle && nextSubtitle) {
-    currentSubtitle = nextSubtitle
-  }
-
   // If no subtitles at all, show an empty state
   if (!currentSubtitle) {
     return (
@@ -59,7 +54,7 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle, currentTime }: Subtitl
           >
             {words.map((word, index) => (
               <span
-                key={`${word.text}-${index}`}
+                key={`${word.text}-${index}-${currentSubtitle.id || ''}`}
                 className={`transition-colors duration-200 ${
                   currentTime >= word.start && currentTime <= word.end
                     ? 'text-blue-600 font-medium'

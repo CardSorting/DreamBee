@@ -7,8 +7,6 @@ import { UserProfile } from '../../../utils/dynamodb/types/user-profile'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs'
 import { LoadingSpinner } from './components/LoadingSpinner'
 import { PublishedTab } from './components/PublishedTab'
-import { FavoritesTab } from './components/FavoritesTab'
-import { DraftsTab } from './components/DraftsTab'
 
 interface ProfileClientProps {
   userId: string
@@ -196,10 +194,6 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
                   <div className="font-medium">{profile.stats?.likesCount || 0}</div>
                 </div>
                 <div>
-                  <div className="text-sm text-gray-500">Favorites</div>
-                  <div className="font-medium">{profile.stats?.favoritesCount || 0}</div>
-                </div>
-                <div>
                   <div className="text-sm text-gray-500">Followers</div>
                   <div className="font-medium">{profile.stats?.followersCount || 0}</div>
                 </div>
@@ -216,23 +210,11 @@ export default function ProfileClient({ userId }: ProfileClientProps) {
         <Tabs defaultValue="published" className="bg-white rounded-lg shadow">
           <TabsList className="border-b p-2">
             <TabsTrigger value="published">Published</TabsTrigger>
-            <TabsTrigger value="favorites">Favorites</TabsTrigger>
-            {isOwner && (
-              <TabsTrigger value="drafts">Drafts</TabsTrigger>
-            )}
           </TabsList>
           <div className="p-6">
             <TabsContent value="published">
               <PublishedTab userId={userId} />
             </TabsContent>
-            <TabsContent value="favorites">
-              <FavoritesTab userId={userId} />
-            </TabsContent>
-            {isOwner && (
-              <TabsContent value="drafts">
-                <DraftsTab userId={userId} />
-              </TabsContent>
-            )}
           </div>
         </Tabs>
       </div>

@@ -10,7 +10,6 @@ import { createManualDialogue } from '../../../utils/dynamodb/manual-dialogues'
 import { chunkDialogue, validateDialogueLength } from '../../../utils/dialogue-chunker'
 import { getAuth } from '@clerk/nextjs/server'
 import { getAudioProcessor } from '../../../utils/assemblyai'
-import { saveDraft } from '../../../utils/dynamodb/dialogue-drafts'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -153,17 +152,6 @@ export async function POST(req: NextRequest) {
         totalChunks: 1
       }
     )
-
-    // Save draft with AssemblyAI result
-    await saveDraft({
-      userId,
-      title: body.title,
-      audioUrls: result.audioUrls,
-      metadata: result.metadata,
-      transcript: result.transcript,
-      assemblyAiResult: result.assemblyAiResult,
-      status: 'draft'
-    })
 
     // Invalidate cache for this dialogue's sessions
     await redisService.invalidateDialogueSessions(userId, dialogueId)

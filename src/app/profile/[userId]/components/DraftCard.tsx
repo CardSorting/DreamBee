@@ -30,14 +30,14 @@ export function DraftCard({ draft, onPublish, onDelete }: DraftCardProps) {
   // Convert transcript.vtt to subtitles array
   const subtitles = draft.transcript?.vtt ? draft.transcript.vtt.split('\n\n')
     .filter(block => block.includes('-->'))
-    .map(block => {
-      const [id, timing, ...textLines] = block.split('\n')
+    .map((block, index) => {
+      const [, timing, ...textLines] = block.split('\n')
       const [start, end] = timing.split(' --> ').map(time => {
         const [h, m, s] = time.split(':').map(Number)
         return ((h * 60 + m) * 60 + s) * 1000
       })
       return {
-        id,
+        id: `subtitle_${index}`, // Use unique index-based ID
         start,
         end,
         text: textLines.join(' ')
