@@ -1,4 +1,4 @@
-import { S3Client } from '@aws-sdk/client-s3'
+import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3'
 
 // Initialize S3 client
 export const s3Client = new S3Client({
@@ -8,3 +8,23 @@ export const s3Client = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
   }
 })
+
+export async function deleteS3Object(key: string) {
+  try {
+    console.log('Deleting S3 object:', key)
+    const command = new DeleteObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME || '',
+      Key: key
+    })
+    await s3Client.send(command)
+    console.log('S3 object deleted successfully:', key)
+  } catch (error: any) {
+    console.error('Failed to delete S3 object:', {
+      key,
+      error: error.message,
+      code: error.code,
+      name: error.name
+    })
+    throw error
+  }
+}

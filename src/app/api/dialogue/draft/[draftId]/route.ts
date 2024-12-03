@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { deleteDraft, getDraft, updateDraft } from '@/utils/dynamodb/dialogue-drafts'
+import { deleteDraft, getDraft, updateDraft, DialogueDraft } from '@/utils/dynamodb/dialogue-drafts'
 import { DIALOGUE_GENRES } from '@/utils/dynamodb/types/published-dialogue'
 
 export async function DELETE(
@@ -46,7 +46,7 @@ export async function DELETE(
       )
     }
 
-    // Delete the draft
+    // Delete the draft from DynamoDB
     await deleteDraft(currentUserId, draftId)
     console.log('Draft deleted successfully:', { draftId })
 
