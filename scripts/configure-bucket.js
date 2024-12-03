@@ -25,27 +25,15 @@ const bucketPolicy = {
   Version: '2012-10-17',
   Statement: [
     {
-      Sid: 'PublicReadForConversations',
-      Effect: 'Allow',
-      Principal: '*',
-      Action: ['s3:GetObject'],
-      Resource: [`arn:aws:s3:::${BUCKET_NAME}/conversations/*`]
-    },
-    {
-      Sid: 'PublicReadForTests',
-      Effect: 'Allow',
-      Principal: '*',
-      Action: ['s3:GetObject'],
-      Resource: [`arn:aws:s3:::${BUCKET_NAME}/test/*`]
-    },
-    {
       Sid: 'PublicReadForDialogues',
       Effect: 'Allow',
       Principal: '*',
       Action: ['s3:GetObject'],
       Resource: [
         `arn:aws:s3:::${BUCKET_NAME}/dialogues/*`,
-        `arn:aws:s3:::${BUCKET_NAME}/**/chunk*/*`
+        `arn:aws:s3:::${BUCKET_NAME}/*/*/chunk*/*`,
+        `arn:aws:s3:::${BUCKET_NAME}/**/chunk*/*`,
+        `arn:aws:s3:::${BUCKET_NAME}/*/chunk*/*`
       ]
     }
   ]
@@ -106,7 +94,7 @@ async function configureBucket() {
 
     console.log('\nBucket configuration completed successfully!');
     console.log('\nNotes:');
-    console.log('1. Audio files in conversations/*, test/*, dialogues/*, and chunk* paths are now publicly readable');
+    console.log('1. Audio files in dialogues/* and chunk* paths are now publicly readable');
     console.log('2. CORS is configured to allow audio playback');
     console.log('3. Write operations still require authentication');
     console.log('\nTest your configuration by:');
