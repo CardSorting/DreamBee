@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useState, useCallback, useRef, memo } from 'react'
 import { getAudioMerger, AudioSegmentInfo } from '../../../utils/audio-merger'
 import { getAudioProcessor } from '../../../utils/assemblyai'
@@ -43,11 +41,12 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   }, [onError])
 
   const updateSubtitles = useCallback(() => {
-    if (!transcriptionResult?.subtitles?.length || !audioRef.current) {
+    if (!transcriptionResult?.subtitles?.length) {
       return
     }
 
-    const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
+    const timeMs = audioRef.current ? TimeFormatter.secondsToMs(audioRef.current.currentTime) : 0
+    const durationMs = audioRef.current ? TimeFormatter.secondsToMs(audioRef.current.duration) : 0
     console.log('Current time (ms):', timeMs)
 
     // Use the sorted subtitles from ref
@@ -57,6 +56,22 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
 
     const currentIndex = current ? sortedSubtitlesRef.current.indexOf(current) : -1
     const next = currentIndex > -1 ? sortedSubtitlesRef.current[currentIndex + 1] : null
+
+    // If no current subtitle is found:
+    if (!current) {
+      if (timeMs === 0 && sortedSubtitlesRef.current.length > 0) {
+        // At the start, show first subtitle
+        setCurrentSubtitle(sortedSubtitlesRef.current[0])
+        setNextSubtitle(sortedSubtitlesRef.current[1] || null)
+        return
+      } else if (timeMs >= durationMs - 100 && sortedSubtitlesRef.current.length > 0) {
+        // At the end, show last subtitle
+        const lastIndex = sortedSubtitlesRef.current.length - 1
+        setCurrentSubtitle(sortedSubtitlesRef.current[lastIndex])
+        setNextSubtitle(null)
+        return
+      }
+    }
 
     console.log('Subtitle update:', {
       current: current?.text,
@@ -140,6 +155,11 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
           // Sort subtitles by start time
           sortedSubtitlesRef.current = [...result.assemblyAiResult.subtitles].sort((a, b) => a.start - b.start)
           setTranscriptionResult(result.assemblyAiResult)
+          // Initialize with first subtitle
+          if (sortedSubtitlesRef.current.length > 0) {
+            setCurrentSubtitle(sortedSubtitlesRef.current[0])
+            setNextSubtitle(sortedSubtitlesRef.current[1] || null)
+          }
           setProgress(100)
           setStatus('Ready')
         } else {
@@ -170,6 +190,11 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
           // Sort subtitles by start time
           sortedSubtitlesRef.current = [...transcription.subtitles].sort((a, b) => a.start - b.start)
           setTranscriptionResult(transcription)
+          // Initialize with first subtitle
+          if (sortedSubtitlesRef.current.length > 0) {
+            setCurrentSubtitle(sortedSubtitlesRef.current[0])
+            setNextSubtitle(sortedSubtitlesRef.current[1] || null)
+          }
           await saveToDrafts(transcription)
         }
       } catch (error) {
@@ -211,6 +236,16 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     }
   }, [updateSubtitles])
 
+  const handleEnded = useCallback(() => {
+    setIsPlaying(false)
+    // Show last subtitle when playback ends
+    if (sortedSubtitlesRef.current.length > 0) {
+      const lastSubtitle = sortedSubtitlesRef.current[sortedSubtitlesRef.current.length - 1]
+      setCurrentSubtitle(lastSubtitle)
+      setNextSubtitle(null)
+    }
+  }, [])
+
   if (!audioUrl || !transcriptionResult) {
     return <LoadingState status={status} progress={progress} />
   }
@@ -242,7 +277,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       <audio
         ref={audioRef}
         src={audioUrl}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={handleEnded}
         onTimeUpdate={handleTimeUpdate}
         onError={() => handleError(new Error('Failed to play audio'))}
       />

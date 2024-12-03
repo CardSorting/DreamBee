@@ -5,17 +5,23 @@ import { SubtitleStyleManager } from '../utils/SubtitleStyleManager'
 const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps) => {
   const styleManager = useRef(new SubtitleStyleManager())
 
-  // If no subtitles are available, show a more informative message
+  // If no current subtitle, show the next subtitle as current
+  if (!currentSubtitle && nextSubtitle) {
+    currentSubtitle = nextSubtitle
+    nextSubtitle = null
+  }
+
+  // If no subtitles at all, show an empty state
   if (!currentSubtitle && !nextSubtitle) {
     return (
       <div className={styleManager.current.getContainerStyles()}>
         <div className={styleManager.current.getWrapperStyles()}>
           <div className={styleManager.current.getSubtitleStyles('current')}>
             <div className={styleManager.current.getSpeakerStyles('current')}>
-              System
+              &nbsp;
             </div>
-            <div className={`${styleManager.current.getTextStyles('current')} mt-1 text-gray-500`}>
-              Waiting for subtitles...
+            <div className={`${styleManager.current.getTextStyles('current')} mt-1`}>
+              &nbsp;
             </div>
           </div>
         </div>
