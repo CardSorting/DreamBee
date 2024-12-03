@@ -38,7 +38,7 @@ export class SubtitleStyleManager {
     const themeStyles = this.theme[type]
     const baseStyles = [
       themeStyles.background,
-      'p-4 rounded-lg transition-all duration-300 ease-in-out w-full'
+      'p-4 rounded-lg transition-all duration-300 ease-in-out w-full min-h-[100px] flex flex-col'
     ]
 
     if (type === 'next') {
@@ -49,15 +49,15 @@ export class SubtitleStyleManager {
   }
 
   getSpeakerStyles(type: 'current' | 'next'): string {
-    return this.theme[type].speaker
+    return `${this.theme[type].speaker} text-sm`
   }
 
   getTextStyles(type: 'current' | 'next'): string {
-    return `${this.theme[type].text} break-words text-base leading-relaxed`
+    return `${this.theme[type].text} break-words text-base leading-relaxed flex-grow`
   }
 
   getContainerStyles(): string {
-    return 'relative h-[400px] overflow-hidden'
+    return 'relative h-[400px] overflow-hidden bg-white'
   }
 
   getWrapperStyles(): string {
