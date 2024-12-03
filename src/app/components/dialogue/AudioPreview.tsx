@@ -34,6 +34,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const processingRef = useRef(false)
   const sortedSubtitlesRef = useRef<any[]>([])
+  const lastSubtitleRef = useRef<any>(null)
 
   const handleError = useCallback((error: Error) => {
     console.error('Processing error:', error.message)
@@ -63,12 +64,19 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
         // At the start, show first subtitle
         setCurrentSubtitle(sortedSubtitlesRef.current[0])
         setNextSubtitle(sortedSubtitlesRef.current[1] || null)
+        lastSubtitleRef.current = sortedSubtitlesRef.current[0]
         return
       } else if (timeMs >= durationMs - 100 && sortedSubtitlesRef.current.length > 0) {
         // At the end, show last subtitle
         const lastIndex = sortedSubtitlesRef.current.length - 1
         setCurrentSubtitle(sortedSubtitlesRef.current[lastIndex])
         setNextSubtitle(null)
+        lastSubtitleRef.current = sortedSubtitlesRef.current[lastIndex]
+        return
+      } else if (lastSubtitleRef.current) {
+        // Show the last known subtitle if no current subtitle is found
+        setCurrentSubtitle(lastSubtitleRef.current)
+        setNextSubtitle(next)
         return
       }
     }
@@ -80,7 +88,11 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       totalSubtitles: sortedSubtitlesRef.current.length
     })
 
-    setCurrentSubtitle(current || null)
+    if (current) {
+      lastSubtitleRef.current = current
+    }
+
+    setCurrentSubtitle(current || lastSubtitleRef.current)
     setNextSubtitle(next || null)
   }, [transcriptionResult])
 
@@ -157,8 +169,10 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
           setTranscriptionResult(result.assemblyAiResult)
           // Initialize with first subtitle
           if (sortedSubtitlesRef.current.length > 0) {
-            setCurrentSubtitle(sortedSubtitlesRef.current[0])
+            const firstSubtitle = sortedSubtitlesRef.current[0]
+            setCurrentSubtitle(firstSubtitle)
             setNextSubtitle(sortedSubtitlesRef.current[1] || null)
+            lastSubtitleRef.current = firstSubtitle
           }
           setProgress(100)
           setStatus('Ready')
@@ -192,8 +206,10 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
           setTranscriptionResult(transcription)
           // Initialize with first subtitle
           if (sortedSubtitlesRef.current.length > 0) {
-            setCurrentSubtitle(sortedSubtitlesRef.current[0])
+            const firstSubtitle = sortedSubtitlesRef.current[0]
+            setCurrentSubtitle(firstSubtitle)
             setNextSubtitle(sortedSubtitlesRef.current[1] || null)
+            lastSubtitleRef.current = firstSubtitle
           }
           await saveToDrafts(transcription)
         }
@@ -243,6 +259,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       const lastSubtitle = sortedSubtitlesRef.current[sortedSubtitlesRef.current.length - 1]
       setCurrentSubtitle(lastSubtitle)
       setNextSubtitle(null)
+      lastSubtitleRef.current = lastSubtitle
     }
   }, [])
 
