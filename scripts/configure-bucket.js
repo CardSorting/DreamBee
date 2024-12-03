@@ -37,6 +37,16 @@ const bucketPolicy = {
       Principal: '*',
       Action: ['s3:GetObject'],
       Resource: [`arn:aws:s3:::${BUCKET_NAME}/test/*`]
+    },
+    {
+      Sid: 'PublicReadForDialogues',
+      Effect: 'Allow',
+      Principal: '*',
+      Action: ['s3:GetObject'],
+      Resource: [
+        `arn:aws:s3:::${BUCKET_NAME}/dialogues/*`,
+        `arn:aws:s3:::${BUCKET_NAME}/**/chunk*/*`
+      ]
     }
   ]
 };
@@ -96,7 +106,7 @@ async function configureBucket() {
 
     console.log('\nBucket configuration completed successfully!');
     console.log('\nNotes:');
-    console.log('1. Audio files in conversations/* and test/* paths are now publicly readable');
+    console.log('1. Audio files in conversations/*, test/*, dialogues/*, and chunk* paths are now publicly readable');
     console.log('2. CORS is configured to allow audio playback');
     console.log('3. Write operations still require authentication');
     console.log('\nTest your configuration by:');
@@ -104,7 +114,7 @@ async function configureBucket() {
     console.log('2. Using the generated URL in a browser or audio player');
 
     console.log('\nSecurity Note:');
-    console.log('- Only the specified paths (conversations/*, test/*) are publicly accessible');
+    console.log('- Only the specified paths are publicly accessible');
     console.log('- All other paths remain private');
     console.log('- Write operations require AWS credentials');
   } catch (error) {
