@@ -17,8 +17,8 @@ export class VTTParser {
     }
 
     while (index < lines.length) {
-      // Skip empty lines and numeric identifiers
-      while (index < lines.length && (!lines[index] || !lines[index].includes('-->'))) {
+      // Skip empty lines, numeric identifiers, and NOTE lines
+      while (index < lines.length && (!lines[index] || !lines[index].includes('-->') || lines[index].startsWith('NOTE'))) {
         index++
       }
 
@@ -43,24 +43,49 @@ export class VTTParser {
       // Parse speaker and text
       if (index < lines.length) {
         const line = lines[index].trim()
-        if (line.includes(':')) {
+        
+        // Handle AssemblyAI <v> tag format
+        if (line.startsWith('<v ')) {
+          const match = line.match(/<v ([^>]+)>(.+)<\/v>/)
+          if (match) {
+            speaker = match[1].trim()
+            text = match[2].trim()
+          } else {
+            // Fallback to regular text if <v> tag is malformed
+            text = line.replace(/<\/?v[^>]*>/g, '').trim()
+          }
+        } else if (line.includes(':')) {
+          // Handle traditional format with speaker:text
           const [speakerName, ...textParts] = line.split(':')
           speaker = speakerName.trim()
           text = textParts.join(':').trim()
         } else {
+          // No speaker identified
           text = line
+          speaker = 'Speaker'
         }
         index++
       }
 
       // Add any additional lines of text
       while (index < lines.length && lines[index].trim() !== '') {
-        text += ' ' + lines[index].trim()
+        const additionalLine = lines[index].trim()
+        // Handle continuation of <v> tag content
+        if (additionalLine.endsWith('</v>')) {
+          text += ' ' + additionalLine.replace(/<\/v>$/, '').trim()
+        } else {
+          text += ' ' + additionalLine
+        }
         index++
       }
 
       if (startTime >= 0 && endTime > startTime) {
-        parsedCues.push({ startTime, endTime, text: text.trim(), speaker })
+        parsedCues.push({ 
+          startTime, 
+          endTime, 
+          text: text.trim(),
+          speaker: speaker || 'Speaker'
+        })
       }
     }
 
@@ -68,17 +93,24 @@ export class VTTParser {
   }
 
   private static parseTimestamp(timestamp: string): number {
-    // Remove any leading/trailing whitespace and remove milliseconds for simplicity
-    const cleanTimestamp = timestamp.trim().split('.')[0]
-    const parts = cleanTimestamp.split(':')
+    // Handle both HH:MM:SS.mmm and MM:SS.mmm formats
+    const [time, milliseconds] = timestamp.trim().split('.')
+    const parts = time.split(':')
     
     try {
       if (parts.length === 3) {
         // HH:MM:SS format
-        return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2])
+        const hours = parseInt(parts[0])
+        const minutes = parseInt(parts[1])
+        const seconds = parseInt(parts[2])
+        const ms = milliseconds ? parseInt(milliseconds) / 1000 : 0
+        return hours * 3600 + minutes * 60 + seconds + ms
       } else if (parts.length === 2) {
         // MM:SS format
-        return parseInt(parts[0]) * 60 + parseInt(parts[1])
+        const minutes = parseInt(parts[0])
+        const seconds = parseInt(parts[1])
+        const ms = milliseconds ? parseInt(milliseconds) / 1000 : 0
+        return minutes * 60 + seconds + ms
       }
     } catch (error) {
       console.warn('Invalid timestamp format:', timestamp)

@@ -1,5 +1,29 @@
 import { AudioSegment } from './google-tts'
 
+interface AssemblyAIUtterance {
+  text: string
+  start: number
+  end: number
+  speaker?: string
+}
+
+interface Subtitle {
+  text: string
+  start: number
+  end: number
+  words: Word[]
+  speaker?: string | null
+}
+
+interface Word {
+  text: string
+  start: number
+  end: number
+  confidence: number
+  speaker?: string | null
+}
+
+// Legacy functions for backward compatibility
 export function generateSRT(segments: AudioSegment[]): string {
   let srtContent = ''
   let index = 1
@@ -12,7 +36,6 @@ export function generateSRT(segments: AudioSegment[]): string {
       const endTime = timestamps.character_end_times_seconds[i]
       const char = timestamps.characters[i]
 
-      // Format times as SRT timestamps (HH:MM:SS,mmm)
       const startSRT = formatSRTTime(startTime)
       const endSRT = formatSRTTime(endTime)
 
@@ -31,23 +54,50 @@ export function generateVTT(segments: AudioSegment[]): string {
   let vttContent = 'WEBVTT\n\n'
 
   segments.forEach(segment => {
-    const { timestamps } = segment
+    const startVTT = formatVTTTime(segment.startTime)
+    const endVTT = formatVTTTime(segment.endTime)
+    const text = segment.timestamps.characters.join('')
 
-    for (let i = 0; i < timestamps.characters.length; i++) {
-      const startTime = timestamps.character_start_times_seconds[i]
-      const endTime = timestamps.character_end_times_seconds[i]
-      const char = timestamps.characters[i]
-
-      // Format times as VTT timestamps (HH:MM:SS.mmm)
-      const startVTT = formatVTTTime(startTime)
-      const endVTT = formatVTTTime(endTime)
-
-      vttContent += `${startVTT} --> ${endVTT}\n`
-      vttContent += `${char}\n\n`
-    }
+    vttContent += `${startVTT} --> ${endVTT}\n`
+    vttContent += `<v ${segment.character.name}>${text}</v>\n\n`
   })
 
   return vttContent
+}
+
+// New AssemblyAI-based functions
+export function generateAssemblyAIVTT(subtitles: Subtitle[]): string {
+  let vttContent = 'WEBVTT\n\n'
+
+  subtitles.forEach((subtitle) => {
+    const startVTT = formatVTTTime(subtitle.start)
+    const endVTT = formatVTTTime(subtitle.end)
+    const speaker = subtitle.speaker || 'Speaker'
+
+    vttContent += `${startVTT} --> ${endVTT}\n`
+    vttContent += `<v ${speaker}>${subtitle.text}</v>\n\n`
+  })
+
+  return vttContent
+}
+
+export function generateAssemblyAISRT(subtitles: Subtitle[]): string {
+  let srtContent = ''
+  let index = 1
+
+  subtitles.forEach((subtitle) => {
+    const startSRT = formatSRTTime(subtitle.start)
+    const endSRT = formatSRTTime(subtitle.end)
+    const speaker = subtitle.speaker || 'Speaker'
+
+    srtContent += `${index}\n`
+    srtContent += `${startSRT} --> ${endSRT}\n`
+    srtContent += `${speaker}: ${subtitle.text}\n\n`
+
+    index++
+  })
+
+  return srtContent
 }
 
 function formatSRTTime(seconds: number): string {

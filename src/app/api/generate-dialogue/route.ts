@@ -5,7 +5,8 @@ import { googleTTS, type Character } from '../../../utils/google-tts'
 import { s3Service } from '../../../utils/s3'
 import { mediaConvert } from '../../../utils/mediaconvert'
 import { ConversationFlowManager } from '../../../utils/conversation-flow'
-import { generateSRT, generateVTT } from '../../../utils/subtitles'
+import { getAudioProcessor } from '../../../utils/assemblyai'
+import { generateAssemblyAISRT, generateAssemblyAIVTT } from '../../../utils/subtitles'
 
 // Check required environment variables
 if (!process.env.GOOGLE_API_KEY) {
@@ -86,29 +87,44 @@ export async function POST(req: NextRequest) {
       audioSegments.push(segment)
     }
 
-    // Generate subtitles
-    const srtContent = generateSRT(audioSegments)
-    const vttContent = generateVTT(audioSegments)
-
     // Upload all audio segments to S3
     const uploads = await s3Service.uploadMultipleAudio(audioSegments, conversationId)
 
-    // Get signed URLs for all uploaded audio segments
-    const audioUrls = await Promise.all(
-      uploads.map(async ({ character, audioKey }: { character: string; audioKey: string }) => ({
+    // Create direct URLs for all uploaded audio segments
+    const audioUrls = uploads.map(({ character, audioKey }) => {
+      const directUrl = `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
+      return {
         character,
-        url: await s3Service.getSignedUrl(audioKey),
-        directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${audioKey}`
-      }))
+        url: directUrl,
+        directUrl
+      }
+    })
+
+    // Process with AssemblyAI for accurate subtitles
+    const assemblyAI = getAudioProcessor()
+    const mergedAudioUrl = audioUrls[0].url // Use the first audio URL for processing
+    const assemblyAiResult = await assemblyAI.generateSubtitles(
+      mergedAudioUrl,
+      {
+        speakerDetection: true,
+        wordTimestamps: true,
+        speakerNames: body.dialogue.map(d => d.character.name)
+      }
     )
+
+    // Generate subtitles from AssemblyAI result
+    const srtContent = generateAssemblyAISRT(assemblyAiResult.subtitles)
+    const vttContent = generateAssemblyAIVTT(assemblyAiResult.subtitles)
 
     // Upload subtitle files
     const srtKey = `conversations/${conversationId}/subtitles.srt`
     const vttKey = `conversations/${conversationId}/subtitles.vtt`
+    const assemblyAiKey = `conversations/${conversationId}/assemblyai-result.json`
 
     await Promise.all([
       s3Service.uploadFile(srtKey, srtContent, 'text/plain'),
-      s3Service.uploadFile(vttKey, vttContent, 'text/plain')
+      s3Service.uploadFile(vttKey, vttContent, 'text/plain'),
+      s3Service.uploadFile(assemblyAiKey, JSON.stringify(assemblyAiResult, null, 2), 'application/json')
     ])
 
     // Create MediaConvert job to assemble podcast
@@ -135,15 +151,7 @@ export async function POST(req: NextRequest) {
       transcript: {
         srt: srtContent,
         vtt: vttContent,
-        json: {
-          duration: currentTime,
-          speakers: uniqueSpeakers,
-          segments: audioSegments.map(s => ({
-            speaker: s.character.name,
-            startTime: s.startTime,
-            endTime: s.endTime
-          }))
-        }
+        json: assemblyAiResult
       },
       metadata: {
         totalDuration: currentTime,
@@ -200,9 +208,9 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Generate fresh signed URLs for audio files
+    // Generate signed URLs for audio segments
     const audioUrls = await Promise.all(
-      conversation.audioSegments.map(async (segment: AudioSegment) => ({
+      conversation.audioSegments.map(async (segment) => ({
         character: segment.character,
         url: await s3Service.getSignedUrl(segment.audioKey),
         directUrl: `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${segment.audioKey}`
@@ -210,9 +218,9 @@ export async function GET(req: NextRequest) {
     )
 
     return NextResponse.json({
-      audioUrls,
       metadata: conversation.metadata,
-      transcript: conversation.transcript
+      transcript: conversation.transcript,
+      audioUrls
     })
   } catch (error) {
     console.error('Error fetching conversation:', error)

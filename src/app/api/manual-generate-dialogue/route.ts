@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { googleTTS, Character, VoiceSettings } from '../../../utils/google-tts'
 import { s3Service } from '../../../utils/s3'
 import { redisService } from '../../../utils/redis'
-import { generateSRT, generateVTT } from '../../../utils/subtitles'
+import { generateAssemblyAISRT, generateAssemblyAIVTT } from '../../../utils/subtitles'
 import { ConversationFlowManager } from '../../../utils/conversation-flow'
 import { CharacterVoice } from '../../../utils/voice-config'
 import { createManualDialogue } from '../../../utils/dynamodb/manual-dialogues'
@@ -251,10 +251,6 @@ async function processDialogueChunk(
     audioSegments.push(segment)
   }
 
-  // Generate subtitles
-  const srtContent = generateSRT(audioSegments)
-  const vttContent = generateVTT(audioSegments)
-
   // Upload all audio segments to S3
   const uploads = await s3Service.uploadMultipleAudio(audioSegments, `${dialogueId}/chunk${chunkIndex}`)
 
@@ -268,15 +264,6 @@ async function processDialogueChunk(
     }
   })
 
-  // Upload subtitle files
-  const srtKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.srt`
-  const vttKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.vtt`
-
-  await Promise.all([
-    s3Service.uploadFile(srtKey, srtContent, 'text/plain'),
-    s3Service.uploadFile(vttKey, vttContent, 'text/plain')
-  ])
-
   // Process with AssemblyAI
   const assemblyAI = getAudioProcessor()
   const mergedAudioUrl = audioUrls[0].url // Use the first audio URL for processing
@@ -289,9 +276,20 @@ async function processDialogueChunk(
     }
   )
 
-  // Upload AssemblyAI result to S3
+  // Generate subtitles from AssemblyAI result
+  const srtContent = generateAssemblyAISRT(assemblyAiResult.subtitles)
+  const vttContent = generateAssemblyAIVTT(assemblyAiResult.subtitles)
+
+  // Upload subtitle files
+  const srtKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.srt`
+  const vttKey = `dialogues/${dialogueId}/chunk${chunkIndex}/subtitles.vtt`
   const assemblyAiKey = `dialogues/${dialogueId}/chunk${chunkIndex}/assemblyai-result.json`
-  await s3Service.uploadFile(assemblyAiKey, JSON.stringify(assemblyAiResult, null, 2), 'application/json')
+
+  await Promise.all([
+    s3Service.uploadFile(srtKey, srtContent, 'text/plain'),
+    s3Service.uploadFile(vttKey, vttContent, 'text/plain'),
+    s3Service.uploadFile(assemblyAiKey, JSON.stringify(assemblyAiResult, null, 2), 'application/json')
+  ])
 
   // Update chunk metadata
   chunkMetadata.status = 'completed'

@@ -5,7 +5,7 @@ export const GOOGLE_TTS_CONFIG = {
 
 // Redis configuration
 export const REDIS_CONFIG = {
-  url: process.env.REDIS_URL || 'redis://localhost:6379',
-  token: process.env.REDIS_TOKEN || '',
-  enabled: process.env.REDIS_ENABLED === 'true'
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  enabled: true
 }

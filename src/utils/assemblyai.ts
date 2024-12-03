@@ -77,6 +77,29 @@ export class AssemblyAIProcessor {
     })
   }
 
+  private async waitForTranscript(transcriptId: string): Promise<ProcessedTranscript> {
+    const maxAttempts = 60 // 5 minutes with 5-second intervals
+    let attempts = 0
+
+    while (attempts < maxAttempts) {
+      const transcript = await this.client.transcripts.get(transcriptId) as ProcessedTranscript
+
+      if (transcript.status === 'completed') {
+        return transcript
+      }
+
+      if (transcript.status === 'error' || transcript.error) {
+        throw new Error(transcript.error || 'Transcription failed')
+      }
+
+      // Wait 5 seconds before checking again
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      attempts++
+    }
+
+    throw new Error('Transcription timed out')
+  }
+
   async generateSubtitles(
     audioUrl: string,
     options: {
@@ -109,21 +132,21 @@ export class AssemblyAIProcessor {
       console.log('Audio uploaded successfully, starting transcription...')
 
       // Submit transcription request with the uploaded audio URL
-      const rawTranscript = await this.client.transcripts.transcribe({
-        audio: uploadResponse.data.upload_url,
-        speaker_labels: options?.speakerDetection,
+      const transcriptionResponse = await this.client.transcripts.create({
+        audio_url: uploadResponse.data.upload_url,
+        speaker_labels: true,
+        speakers_expected: options.speakerNames?.length || 2,
         word_boost: ["*"],
         language_code: "en_us"
       })
 
-      // Cast to our internal type that matches the actual response structure
-      const transcript = rawTranscript as unknown as ProcessedTranscript
+      onProgress?.(25)
 
-      if (transcript.status === 'error' || transcript.error) {
-        throw new Error(transcript.error || 'Transcription failed')
-      }
+      // Wait for transcription to complete
+      console.log('Waiting for transcription to complete...')
+      const transcript = await this.waitForTranscript(transcriptionResponse.id)
 
-      onProgress?.(50)
+      onProgress?.(75)
 
       // Map speaker labels to character names if provided
       let mappedTranscript = { ...transcript }
