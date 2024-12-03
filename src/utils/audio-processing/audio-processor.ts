@@ -2,7 +2,7 @@ import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs/promises'
 import os from 'os'
-import { FileManager } from '@/utils/audio-processing/file-manager'
+import { FileManager } from './file-manager'
 
 export interface AudioSegment {
   url: string
@@ -47,6 +47,15 @@ export class AudioProcessor {
 import os
 import sys
 import urllib.request
+import wave
+import io
+import array
+import struct
+
+def create_silence(duration_ms, sample_rate=44100):
+    # Calculate number of frames needed for silence
+    num_frames = int((duration_ms / 1000.0) * sample_rate)
+    return array.array('h', [0] * num_frames)
 
 def main():
     try:
@@ -60,28 +69,69 @@ def main():
         output_path = os.path.join(temp_dir, 'output.mp3')
         
         # Process each segment
-        with open(output_path, 'wb') as outfile:
-            for i, segment in enumerate(segments):
-                print(f'Processing segment {i + 1}/{len(segments)}', file=sys.stderr)
+        final_audio = array.array('h')
+        current_position = 0
+        sample_rate = 44100  # Standard sample rate
+
+        for i, segment in enumerate(segments):
+            print(f'Processing segment {i + 1}/{len(segments)}', file=sys.stderr)
+            
+            # Calculate silence needed before this segment
+            start_time_ms = int(float(segment['startTime']) * 1000)
+            silence_needed = start_time_ms - current_position
+            
+            if silence_needed > 0:
+                print(f'Adding {silence_needed}ms of silence', file=sys.stderr)
+                silence = create_silence(silence_needed, sample_rate)
+                final_audio.extend(silence)
+                current_position += silence_needed
+            
+            # Download and process segment
+            try:
+                response = urllib.request.urlopen(segment['url'])
+                audio_data = response.read()
+                print(f'Downloaded {len(audio_data)} bytes', file=sys.stderr)
                 
-                # Download segment
-                try:
-                    response = urllib.request.urlopen(segment['url'])
-                    audio_data = response.read()
-                    print(f'Downloaded {len(audio_data)} bytes', file=sys.stderr)
-                    
-                    # Write to output file
-                    outfile.write(audio_data)
-                    print(f'Wrote segment to output file', file=sys.stderr)
-                    
-                except Exception as e:
-                    print(f'Error downloading segment: {str(e)}', file=sys.stderr)
-                    continue
+                # Write segment to temp file
+                segment_path = os.path.join(temp_dir, f'segment_{i}.mp3')
+                with open(segment_path, 'wb') as f:
+                    f.write(audio_data)
                 
-                # Report progress
-                progress = ((i + 1) / len(segments)) * 100
-                print(f'progress:{progress}')
-                sys.stdout.flush()
+                # Convert to WAV and read frames
+                wav_path = os.path.join(temp_dir, f'segment_{i}.wav')
+                os.system(f'ffmpeg -i {segment_path} {wav_path} -y')
+                
+                with wave.open(wav_path, 'rb') as wav:
+                    frames = wav.readframes(wav.getnframes())
+                    audio_array = array.array('h')
+                    audio_array.frombytes(frames)
+                    final_audio.extend(audio_array)
+                
+                # Update current position
+                segment_duration = int(float(segment['endTime'] - segment['startTime']) * 1000)
+                current_position += segment_duration
+                
+                print(f'Added segment, current position: {current_position}ms', file=sys.stderr)
+                
+            except Exception as e:
+                print(f'Error processing segment: {str(e)}', file=sys.stderr)
+                continue
+            
+            # Report progress
+            progress = ((i + 1) / len(segments)) * 100
+            print(f'progress:{progress}')
+            sys.stdout.flush()
+        
+        # Write final audio to WAV
+        final_wav_path = os.path.join(temp_dir, 'final.wav')
+        with wave.open(final_wav_path, 'wb') as wav:
+            wav.setnchannels(1)  # Mono
+            wav.setsampwidth(2)  # 2 bytes per sample
+            wav.setframerate(sample_rate)
+            wav.writeframes(final_audio.tobytes())
+        
+        # Convert to MP3
+        os.system(f'ffmpeg -i {final_wav_path} {output_path} -y')
         
         # Read and output the final file
         if os.path.exists(output_path):

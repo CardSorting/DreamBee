@@ -1,34 +1,23 @@
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { randomBytes } from 'crypto'
 
 export class FileManager {
-  constructor(private readonly baseDir: string = path.join(os.tmpdir(), 'audio-processing')) {}
-
   async createTempDir(): Promise<string> {
-    const uniqueId = randomBytes(16).toString('hex')
-    const tempDir = path.join(this.baseDir, uniqueId)
-    await fs.mkdir(tempDir, { recursive: true })
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'audio-'))
     return tempDir
   }
 
-  async cleanup(dir: string): Promise<void> {
+  async cleanup(tempDir: string): Promise<void> {
     try {
-      const files = await fs.readdir(dir)
-      await Promise.all(
-        files.map(file => fs.unlink(path.join(dir, file)))
-      )
-      await fs.rmdir(dir)
+      await fs.rm(tempDir, { recursive: true, force: true })
     } catch (error) {
-      console.warn('Warning: Failed to clean up temp directory:', error)
+      console.error('Error cleaning up temp directory:', error)
     }
   }
 
-  async writeFile(dir: string, filename: string, content: Buffer): Promise<string> {
-    const filePath = path.join(dir, filename)
+  async writeFile(filePath: string, content: Buffer | string): Promise<void> {
     await fs.writeFile(filePath, content)
-    return filePath
   }
 
   async readFile(filePath: string): Promise<Buffer> {
@@ -42,5 +31,9 @@ export class FileManager {
     } catch {
       return false
     }
+  }
+
+  async ensureDir(dirPath: string): Promise<void> {
+    await fs.mkdir(dirPath, { recursive: true })
   }
 }

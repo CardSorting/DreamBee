@@ -11,7 +11,8 @@ import { chunkDialogue, validateDialogueLength } from '../../../utils/dialogue-c
 import { getAuth } from '@clerk/nextjs/server'
 import { getAudioProcessor } from '../../../utils/assemblyai'
 import { saveDraft } from '../../../utils/dynamodb/dialogue-drafts'
-import { getAudioMerger } from '../../../utils/audio-merger'
+import { AudioProcessor } from '../../../utils/audio-processing/audio-processor'
+import { FileManager } from '../../../utils/audio-processing/file-manager'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -65,11 +66,6 @@ interface ChunkProcessingMetadata {
     timestamps?: any
   }>
   error?: string
-}
-
-async function blobToBuffer(blob: Blob): Promise<Buffer> {
-  const arrayBuffer = await blob.arrayBuffer()
-  return Buffer.from(arrayBuffer)
 }
 
 export async function POST(req: NextRequest) {
@@ -258,7 +254,13 @@ async function processDialogueChunk(
   }
 
   // Upload all audio segments to S3
-  const uploads = await s3Service.uploadMultipleAudio(audioSegments, `${dialogueId}/chunk${chunkIndex}`)
+  const uploads = await s3Service.uploadMultipleAudio(audioSegments.map(segment => ({
+    audio: segment.audio,
+    character: segment.character.name,
+    startTime: segment.startTime,
+    endTime: segment.endTime,
+    timestamps: segment.timestamps
+  })), `${dialogueId}/chunk${chunkIndex}`)
 
   // Create direct URLs for all uploaded audio segments
   const audioUrls = uploads.map(({ character, audioKey }) => {
@@ -270,8 +272,11 @@ async function processDialogueChunk(
     }
   })
 
-  // Merge audio segments
-  const audioMerger = getAudioMerger()
+  // Initialize audio processor and file manager
+  const fileManager = new FileManager()
+  const audioProcessor = new AudioProcessor(fileManager)
+
+  // Merge audio segments with proper timing
   const segments = audioUrls.map((audio, index) => ({
     url: audio.directUrl,
     startTime: audioSegments[index].startTime,
@@ -279,8 +284,13 @@ async function processDialogueChunk(
     character: audio.character
   }))
 
-  const mergedAudioBlob = await audioMerger.mergeAudioSegments(segments, 'preview')
-  const mergedAudioBuffer = await blobToBuffer(mergedAudioBlob)
+  console.log('Processing segments:', segments.map(s => ({
+    character: s.character,
+    startTime: s.startTime,
+    endTime: s.endTime
+  })))
+
+  const mergedAudioBuffer = await audioProcessor.processSegments(segments)
   const mergedAudioKey = `${dialogueId}/chunk${chunkIndex}/merged.mp3`
   await s3Service.uploadFile(mergedAudioKey, mergedAudioBuffer, 'audio/mpeg')
   const mergedAudioUrl = `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${mergedAudioKey}`

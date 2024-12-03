@@ -22,6 +22,15 @@ export class AudioMerger {
     this.onProgress = onProgress
   }
 
+  private getBaseUrl() {
+    // Check if we're in a browser environment
+    if (typeof window !== 'undefined') {
+      return window.location.origin
+    }
+    // In server environment, use localhost with the port from env or default to 3000
+    return `http://localhost:${process.env.PORT || 3000}`
+  }
+
   async mergeAudioSegments(segments: AudioSegmentInfo[], conversationId: string): Promise<Blob> {
     try {
       this.abortController = new AbortController()
@@ -32,7 +41,8 @@ export class AudioMerger {
         totalSegments: segments.length 
       })
 
-      const response = await fetch('/api/audio/merge', {
+      const baseUrl = this.getBaseUrl()
+      const response = await fetch(`${baseUrl}/api/audio/merge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -103,7 +113,8 @@ export class AudioMerger {
         throw new Error('Task cancelled')
       }
 
-      const response = await fetch(`/api/audio/merge?taskId=${taskId}`)
+      const baseUrl = this.getBaseUrl()
+      const response = await fetch(`${baseUrl}/api/audio/merge?taskId=${taskId}`)
       
       if (!response.ok) {
         throw new Error('Failed to get task status')
