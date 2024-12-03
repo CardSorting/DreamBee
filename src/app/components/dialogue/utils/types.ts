@@ -16,6 +16,24 @@ export interface GenerationResult {
     vtt: string
     json: any
   }
+  assemblyAiResult?: {
+    text: string
+    subtitles: Array<{
+      text: string
+      start: number
+      end: number
+      words: Array<{
+        text: string
+        start: number
+        end: number
+        confidence: number
+        speaker?: string | null
+      }>
+      speaker?: string | null
+    }>
+    speakers: string[]
+    confidence: number
+  }
 }
 
 export interface AudioPreviewProps {

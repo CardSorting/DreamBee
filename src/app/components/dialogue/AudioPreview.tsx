@@ -80,7 +80,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       try {
         setStatus('Processing audio')
         const segments: AudioSegmentInfo[] = result.audioUrls.map(audio => ({
-          url: audio.url,
+          url: audio.directUrl,
           startTime: 0,
           endTime: 0,
           character: audio.character
@@ -94,31 +94,40 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
         const url = URL.createObjectURL(audioBlob)
         setAudioUrl(url)
 
-        const characterNames = segments.map(segment => segment.character)
+        // Check if we already have AssemblyAI result in the draft
+        if (result.assemblyAiResult?.subtitles?.length) {
+          console.log('Using stored AssemblyAI result')
+          setTranscriptionResult(result.assemblyAiResult)
+          setProgress(100)
+          setStatus('Ready')
+        } else {
+          // If no stored result, process with AssemblyAI
+          console.log('No stored AssemblyAI result, processing audio')
+          const characterNames = segments.map(segment => segment.character)
 
-        setStatus('Generating subtitles')
-        const assemblyAI = getAudioProcessor()
-        const transcription = await assemblyAI.generateSubtitles(
-          url,
-          { 
-            speakerDetection: true,
-            wordTimestamps: true,
-            speakerNames: characterNames
-          },
-          subtitleProgress => {
-            setProgress(50 + Math.floor(subtitleProgress / 2))
-          }
-        )
+          setStatus('Generating subtitles')
+          const assemblyAI = getAudioProcessor()
+          const transcription = await assemblyAI.generateSubtitles(
+            url,
+            { 
+              speakerDetection: true,
+              wordTimestamps: true,
+              speakerNames: characterNames
+            },
+            subtitleProgress => {
+              setProgress(50 + Math.floor(subtitleProgress / 2))
+            }
+          )
 
-        console.log('Received transcription:', {
-          textLength: transcription.text?.length,
-          subtitleCount: transcription.subtitles?.length,
-          speakers: transcription.speakers
-        })
+          console.log('Received transcription:', {
+            textLength: transcription.text?.length,
+            subtitleCount: transcription.subtitles?.length,
+            speakers: transcription.speakers
+          })
 
-        setTranscriptionResult(transcription)
-        await saveToDrafts(transcription)
-
+          setTranscriptionResult(transcription)
+          await saveToDrafts(transcription)
+        }
       } catch (error) {
         handleError(error instanceof Error ? error : new Error('Unknown error'))
       } finally {

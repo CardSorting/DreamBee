@@ -9,6 +9,8 @@ import { CharacterVoice } from '../../../utils/voice-config'
 import { createManualDialogue } from '../../../utils/dynamodb/manual-dialogues'
 import { chunkDialogue, validateDialogueLength } from '../../../utils/dialogue-chunker'
 import { getAuth } from '@clerk/nextjs/server'
+import { getAudioProcessor } from '../../../utils/assemblyai'
+import { saveDraft } from '../../../utils/dynamodb/dialogue-drafts'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -155,6 +157,18 @@ export async function POST(req: NextRequest) {
       }
     )
 
+    // Save draft with AssemblyAI result
+    await saveDraft({
+      userId,
+      title: body.title,
+      description: body.description,
+      audioUrls: result.audioUrls,
+      metadata: result.metadata,
+      transcript: result.transcript,
+      assemblyAiResult: result.assemblyAiResult,
+      status: 'draft'
+    })
+
     // Invalidate cache for this dialogue's sessions
     await redisService.invalidateDialogueSessions(userId, dialogueId)
 
@@ -270,6 +284,22 @@ async function processDialogueChunk(
     s3Service.uploadFile(vttKey, vttContent, 'text/plain')
   ])
 
+  // Process with AssemblyAI
+  const assemblyAI = getAudioProcessor()
+  const mergedAudioUrl = audioUrls[0].directUrl // Use the first audio URL for processing
+  const assemblyAiResult = await assemblyAI.generateSubtitles(
+    mergedAudioUrl,
+    {
+      speakerDetection: true,
+      wordTimestamps: true,
+      speakerNames: chunk.characters.map(c => c.customName)
+    }
+  )
+
+  // Upload AssemblyAI result to S3
+  const assemblyAiKey = `dialogues/${dialogueId}/chunk${chunkIndex}/assemblyai-result.json`
+  await s3Service.uploadFile(assemblyAiKey, JSON.stringify(assemblyAiResult, null, 2), 'application/json')
+
   // Update chunk metadata
   chunkMetadata.status = 'completed'
 
@@ -291,6 +321,7 @@ async function processDialogueChunk(
       srt: srtContent,
       vtt: vttContent,
       json: transcript
-    }
+    },
+    assemblyAiResult
   }
 }
