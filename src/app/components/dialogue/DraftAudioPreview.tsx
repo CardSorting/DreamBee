@@ -19,6 +19,7 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
   const [currentSubtitle, setCurrentSubtitle] = useState<any>(null)
   const [nextSubtitle, setNextSubtitle] = useState<any>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const sortedSubtitlesRef = useRef<any[]>([])
 
   // Get the merged audio URL from the first audio URL - using directUrl instead of url
   const audioUrl = draft.audioUrls[0]?.directUrl
@@ -35,26 +36,33 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
       return
     }
 
+    // Initialize sorted subtitles if not already done
+    if (!sortedSubtitlesRef.current.length) {
+      sortedSubtitlesRef.current = [...subtitles].sort((a, b) => a.start - b.start)
+      console.log('Initialized sorted subtitles:', {
+        count: sortedSubtitlesRef.current.length,
+        first: sortedSubtitlesRef.current[0],
+        last: sortedSubtitlesRef.current[sortedSubtitlesRef.current.length - 1]
+      })
+    }
+
     const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
     console.log('Current time (ms):', timeMs)
-
-    // Sort subtitles by start time to ensure proper ordering
-    const sortedSubtitles = [...subtitles].sort((a, b) => a.start - b.start)
     
     // Find current subtitle using AssemblyAI timestamps
-    const current = sortedSubtitles.find(
+    const current = sortedSubtitlesRef.current.find(
       (sub: any) => timeMs >= sub.start && timeMs <= sub.end
     )
 
     // Find next subtitle
-    const currentIndex = current ? sortedSubtitles.indexOf(current) : -1
-    const next = currentIndex > -1 ? sortedSubtitles[currentIndex + 1] : null
+    const currentIndex = current ? sortedSubtitlesRef.current.indexOf(current) : -1
+    const next = currentIndex > -1 ? sortedSubtitlesRef.current[currentIndex + 1] : null
 
     console.log('Subtitle update:', {
       current: current?.text,
       next: next?.text,
       timeMs,
-      totalSubtitles: sortedSubtitles.length
+      totalSubtitles: sortedSubtitlesRef.current.length
     })
 
     setCurrentSubtitle(current)

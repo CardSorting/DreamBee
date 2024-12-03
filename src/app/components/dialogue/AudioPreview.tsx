@@ -35,6 +35,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
   const [draftId, setDraftId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const processingRef = useRef(false)
+  const sortedSubtitlesRef = useRef<any[]>([])
 
   const handleError = useCallback((error: Error) => {
     console.error('Processing error:', error.message)
@@ -49,21 +50,19 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
     console.log('Current time (ms):', timeMs)
 
-    // Sort subtitles by start time to ensure proper ordering
-    const sortedSubtitles = [...transcriptionResult.subtitles].sort((a, b) => a.start - b.start)
-
-    const current = sortedSubtitles.find(
+    // Use the sorted subtitles from ref
+    const current = sortedSubtitlesRef.current.find(
       (sub: any) => timeMs >= sub.start && timeMs <= sub.end
     )
 
-    const currentIndex = current ? sortedSubtitles.indexOf(current) : -1
-    const next = currentIndex > -1 ? sortedSubtitles[currentIndex + 1] : null
+    const currentIndex = current ? sortedSubtitlesRef.current.indexOf(current) : -1
+    const next = currentIndex > -1 ? sortedSubtitlesRef.current[currentIndex + 1] : null
 
     console.log('Subtitle update:', {
       current: current?.text,
       next: next?.text,
       timeMs,
-      totalSubtitles: sortedSubtitles.length
+      totalSubtitles: sortedSubtitlesRef.current.length
     })
 
     setCurrentSubtitle(current || null)
@@ -138,6 +137,8 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
             subtitleCount: result.assemblyAiResult.subtitles.length,
             speakers: result.assemblyAiResult.speakers
           })
+          // Sort subtitles by start time
+          sortedSubtitlesRef.current = [...result.assemblyAiResult.subtitles].sort((a, b) => a.start - b.start)
           setTranscriptionResult(result.assemblyAiResult)
           setProgress(100)
           setStatus('Ready')
@@ -166,6 +167,8 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
             speakers: transcription.speakers
           })
 
+          // Sort subtitles by start time
+          sortedSubtitlesRef.current = [...transcription.subtitles].sort((a, b) => a.start - b.start)
           setTranscriptionResult(transcription)
           await saveToDrafts(transcription)
         }

@@ -65,6 +65,21 @@ interface ProcessedTranscript {
   confidence: number
 }
 
+interface Utterance {
+  text: string
+  start: number
+  end: number
+  confidence: number
+  speaker: string | undefined
+  words: Array<{
+    text: string
+    start: number
+    end: number
+    confidence: number
+    speaker?: string
+  }>
+}
+
 export class AssemblyAIProcessor {
   private client: AssemblyAI
 
@@ -85,6 +100,15 @@ export class AssemblyAIProcessor {
       const transcript = await this.client.transcripts.get(transcriptId) as ProcessedTranscript
 
       if (transcript.status === 'completed') {
+        console.log('Raw transcript:', {
+          utterances: transcript.utterances?.map(u => ({
+            text: u.text,
+            start: u.start,
+            end: u.end,
+            speaker: u.speaker
+          })),
+          words: transcript.words?.length
+        })
         return transcript
       }
 
@@ -137,7 +161,12 @@ export class AssemblyAIProcessor {
         speaker_labels: true,
         speakers_expected: options.speakerNames?.length || 2,
         word_boost: ["*"],
-        language_code: "en_us"
+        language_code: "en_us",
+        disfluencies: false,
+        auto_highlights: true,
+        entity_detection: true,
+        sentiment_analysis: true,
+        auto_chapters: true
       })
 
       onProgress?.(25)
@@ -151,6 +180,56 @@ export class AssemblyAIProcessor {
       // Map speaker labels to character names if provided
       let mappedTranscript = { ...transcript }
       const speakerNames = options.speakerNames || []
+
+      // Create utterances from words if none exist
+      if (!mappedTranscript.utterances?.length && mappedTranscript.words?.length) {
+        console.log('Creating utterances from words')
+        const utterances: Utterance[] = []
+        let currentUtterance: Utterance | null = null
+        let currentSpeaker: string | undefined = undefined
+
+        mappedTranscript.words.forEach((word) => {
+          if (!currentUtterance || word.speaker !== currentSpeaker) {
+            // Start a new utterance
+            if (currentUtterance) {
+              utterances.push(currentUtterance)
+            }
+            currentSpeaker = word.speaker
+            currentUtterance = {
+              text: word.text,
+              start: word.start,
+              end: word.end,
+              confidence: word.confidence,
+              speaker: word.speaker,
+              words: [word]
+            }
+          } else {
+            // Add to current utterance
+            currentUtterance.text += ' ' + word.text
+            currentUtterance.end = word.end
+            currentUtterance.words.push(word)
+            // Update confidence as average of all words
+            currentUtterance.confidence = currentUtterance.words.reduce((sum, w) => sum + w.confidence, 0) / currentUtterance.words.length
+          }
+        })
+
+        // Add the last utterance
+        if (currentUtterance) {
+          utterances.push(currentUtterance)
+        }
+
+        mappedTranscript.utterances = utterances
+        console.log('Created utterances:', {
+          count: utterances.length,
+          utterances: utterances.map(u => ({
+            text: u.text,
+            start: u.start,
+            end: u.end,
+            speaker: u.speaker,
+            confidence: u.confidence
+          }))
+        })
+      }
 
       if (mappedTranscript.utterances && speakerNames.length > 0) {
         const speakerMap = new Map<string, string>()
@@ -180,27 +259,27 @@ export class AssemblyAIProcessor {
 
       onProgress?.(100)
 
-      // Sort utterances by start time to ensure proper ordering
-      const sortedUtterances = mappedTranscript.utterances?.sort((a, b) => a.start - b.start) || []
+      // Sort utterances by start time
+      const sortedUtterances = [...(mappedTranscript.utterances || [])].sort((a, b) => a.start - b.start)
 
       // Format the response to match our interface
       const result: TranscriptionResult = {
         text: mappedTranscript.text || '',
         words: (mappedTranscript.words || []).map((word) => ({
           text: word.text,
-          start: word.start,  // Keep original milliseconds
-          end: word.end,      // Keep original milliseconds
+          start: word.start,
+          end: word.end,
           confidence: word.confidence || 0,
           speaker: word.speaker || null
         })),
         subtitles: sortedUtterances.map((utterance) => ({
           text: utterance.text,
-          start: utterance.start,  // Keep original milliseconds
-          end: utterance.end,      // Keep original milliseconds
+          start: utterance.start,
+          end: utterance.end,
           words: (utterance.words || []).map((word) => ({
             text: word.text,
-            start: word.start,    // Keep original milliseconds
-            end: word.end,        // Keep original milliseconds
+            start: word.start,
+            end: word.end,
             confidence: word.confidence || 0,
             speaker: word.speaker || null
           })),
@@ -214,8 +293,13 @@ export class AssemblyAIProcessor {
         textLength: result.text.length,
         subtitleCount: result.subtitles.length,
         speakers: result.speakers,
-        firstSubtitle: result.subtitles[0],
-        lastSubtitle: result.subtitles[result.subtitles.length - 1]
+        subtitles: result.subtitles.map(s => ({
+          text: s.text,
+          start: s.start,
+          end: s.end,
+          speaker: s.speaker,
+          confidence: s.words.reduce((sum, w) => sum + w.confidence, 0) / s.words.length
+        }))
       })
 
       return result
