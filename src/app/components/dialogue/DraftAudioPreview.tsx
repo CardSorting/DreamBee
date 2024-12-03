@@ -31,24 +31,45 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
   // Update subtitles based on current time using AssemblyAI result
   const updateSubtitles = useCallback(() => {
     const subtitles = draft.assemblyAiResult?.subtitles
-    if (!subtitles?.length) {
+    if (!subtitles?.length || !audioRef.current) {
       return
     }
 
-    const time = (audioRef.current?.currentTime || 0) * 1000 // Convert to ms to match AssemblyAI timestamps
+    const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
+    console.log('Current time (ms):', timeMs)
+
+    // Sort subtitles by start time to ensure proper ordering
+    const sortedSubtitles = [...subtitles].sort((a, b) => a.start - b.start)
     
     // Find current subtitle using AssemblyAI timestamps
-    const current = subtitles.find(
-      (sub: any) => time >= sub.start && time <= sub.end
+    const current = sortedSubtitles.find(
+      (sub: any) => timeMs >= sub.start && timeMs <= sub.end
     )
 
     // Find next subtitle
-    const currentIndex = current ? subtitles.indexOf(current) : -1
-    const next = currentIndex > -1 ? subtitles[currentIndex + 1] : null
+    const currentIndex = current ? sortedSubtitles.indexOf(current) : -1
+    const next = currentIndex > -1 ? sortedSubtitles[currentIndex + 1] : null
+
+    console.log('Subtitle update:', {
+      current: current?.text,
+      next: next?.text,
+      timeMs,
+      totalSubtitles: sortedSubtitles.length
+    })
 
     setCurrentSubtitle(current)
     setNextSubtitle(next)
   }, [draft.assemblyAiResult?.subtitles])
+
+  const handleTimeUpdate = useCallback(() => {
+    if (audioRef.current) {
+      const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
+      const durationMs = TimeFormatter.secondsToMs(audioRef.current.duration)
+      setCurrentTime(timeMs)
+      setProgress(TimeFormatter.getProgressPercentage(timeMs, durationMs))
+      updateSubtitles()
+    }
+  }, [updateSubtitles])
 
   const togglePlayback = useCallback(() => {
     if (audioRef.current) {
@@ -63,21 +84,12 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
     }
   }, [isPlaying, handleError])
 
-  const handleTimeUpdate = useCallback(() => {
+  const handleSeek = useCallback((timeMs: number) => {
     if (audioRef.current) {
-      const time = audioRef.current.currentTime
-      const duration = audioRef.current.duration
-      setCurrentTime(time)
-      setProgress(TimeFormatter.getProgressPercentage(time, duration))
-      updateSubtitles()
-    }
-  }, [updateSubtitles])
-
-  const handleSeek = useCallback((time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time
-      setCurrentTime(time)
-      setProgress(TimeFormatter.getProgressPercentage(time, audioRef.current.duration))
+      const seconds = TimeFormatter.msToSeconds(timeMs)
+      audioRef.current.currentTime = seconds
+      setCurrentTime(timeMs)
+      setProgress(TimeFormatter.getProgressPercentage(timeMs, TimeFormatter.secondsToMs(audioRef.current.duration)))
       updateSubtitles()
     }
   }, [updateSubtitles])
@@ -97,12 +109,12 @@ const DraftAudioPreview = ({ draft, onError }: DraftAudioPreviewProps) => {
           <PlayButton isPlaying={isPlaying} onClick={togglePlayback} />
           <ProgressBar 
             progress={progress}
-            duration={draft.metadata.totalDuration}
+            duration={TimeFormatter.secondsToMs(draft.metadata.totalDuration)}
             currentTime={currentTime}
             onSeek={handleSeek}
           />
           <div className="text-sm text-gray-600 min-w-[70px] tabular-nums">
-            {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(draft.metadata.totalDuration)}
+            {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(TimeFormatter.secondsToMs(draft.metadata.totalDuration))}
           </div>
         </div>
         <SubtitleDisplay 

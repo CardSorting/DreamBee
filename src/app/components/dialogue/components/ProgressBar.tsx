@@ -13,7 +13,8 @@ export const ProgressBar = ({ progress, duration, currentTime, onSeek }: Progres
       const x = e.clientX - bounds.left
       const width = bounds.width
       const percentage = x / width
-      setHoverTime(TimeFormatter.getTimeFromPercentage(percentage * 100, duration))
+      const timeMs = TimeFormatter.getTimeFromPercentage(percentage * 100, duration)
+      setHoverTime(timeMs)
     }
   }
 
@@ -23,7 +24,8 @@ export const ProgressBar = ({ progress, duration, currentTime, onSeek }: Progres
       const x = e.clientX - bounds.left
       const width = bounds.width
       const percentage = x / width
-      onSeek(TimeFormatter.getTimeFromPercentage(percentage * 100, duration))
+      const timeMs = TimeFormatter.getTimeFromPercentage(percentage * 100, duration)
+      onSeek(timeMs)
     }
   }
 

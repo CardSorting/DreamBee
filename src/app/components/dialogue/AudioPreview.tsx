@@ -41,6 +41,45 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     onError(error.message)
   }, [onError])
 
+  const updateSubtitles = useCallback(() => {
+    if (!transcriptionResult?.subtitles?.length || !audioRef.current) {
+      return
+    }
+
+    const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
+    console.log('Current time (ms):', timeMs)
+
+    // Sort subtitles by start time to ensure proper ordering
+    const sortedSubtitles = [...transcriptionResult.subtitles].sort((a, b) => a.start - b.start)
+
+    const current = sortedSubtitles.find(
+      (sub: any) => timeMs >= sub.start && timeMs <= sub.end
+    )
+
+    const currentIndex = current ? sortedSubtitles.indexOf(current) : -1
+    const next = currentIndex > -1 ? sortedSubtitles[currentIndex + 1] : null
+
+    console.log('Subtitle update:', {
+      current: current?.text,
+      next: next?.text,
+      timeMs,
+      totalSubtitles: sortedSubtitles.length
+    })
+
+    setCurrentSubtitle(current || null)
+    setNextSubtitle(next || null)
+  }, [transcriptionResult])
+
+  const handleTimeUpdate = useCallback(() => {
+    if (audioRef.current) {
+      const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
+      const durationMs = TimeFormatter.secondsToMs(audioRef.current.duration)
+      setCurrentTime(timeMs)
+      setProgress(TimeFormatter.getProgressPercentage(timeMs, durationMs))
+      updateSubtitles()
+    }
+  }, [updateSubtitles])
+
   const saveToDrafts = useCallback(async (transcription: any) => {
     try {
       setStatus('Saving draft')
@@ -95,7 +134,10 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
 
         // Check if we already have AssemblyAI result
         if (result.assemblyAiResult?.subtitles?.length) {
-          console.log('Using stored AssemblyAI result')
+          console.log('Using stored AssemblyAI result:', {
+            subtitleCount: result.assemblyAiResult.subtitles.length,
+            speakers: result.assemblyAiResult.speakers
+          })
           setTranscriptionResult(result.assemblyAiResult)
           setProgress(100)
           setStatus('Ready')
@@ -143,47 +185,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     }
   }, [result, handleError, saveToDrafts])
 
-  useEffect(() => {
-    if (!transcriptionResult?.subtitles?.length) {
-      console.log('No subtitles available in transcription result')
-      return
-    }
-
-    console.log('Current transcription result:', {
-      subtitleCount: transcriptionResult.subtitles.length,
-      speakers: transcriptionResult.speakers
-    })
-
-    const updateSubtitles = () => {
-      const timeMs = (audioRef.current?.currentTime || 0) * 1000 // Convert seconds to milliseconds
-      console.log('Current time (ms):', timeMs)
-
-      const current = transcriptionResult.subtitles.find(
-        (sub: any) => timeMs >= sub.start && timeMs <= sub.end
-      )
-
-      const currentIndex = current ? transcriptionResult.subtitles.indexOf(current) : -1
-      const next = currentIndex > -1 ? transcriptionResult.subtitles[currentIndex + 1] : null
-
-      console.log('Subtitle update:', {
-        current: current?.text,
-        next: next?.text,
-        timeMs
-      })
-
-      setCurrentSubtitle(current || null)
-      setNextSubtitle(next || null)
-    }
-
-    updateSubtitles()
-
-    const audio = audioRef.current
-    if (audio) {
-      audio.addEventListener('timeupdate', updateSubtitles)
-      return () => audio.removeEventListener('timeupdate', updateSubtitles)
-    }
-  }, [transcriptionResult])
-
   const togglePlayback = useCallback(() => {
     if (audioRef.current) {
       if (isPlaying) {
@@ -197,22 +198,15 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     }
   }, [isPlaying, handleError])
 
-  const handleTimeUpdate = useCallback(() => {
+  const handleSeek = useCallback((timeMs: number) => {
     if (audioRef.current) {
-      const time = audioRef.current.currentTime
-      const duration = audioRef.current.duration
-      setCurrentTime(time)
-      setProgress(TimeFormatter.getProgressPercentage(time, duration))
+      const seconds = TimeFormatter.msToSeconds(timeMs)
+      audioRef.current.currentTime = seconds
+      setCurrentTime(timeMs)
+      setProgress(TimeFormatter.getProgressPercentage(timeMs, TimeFormatter.secondsToMs(audioRef.current.duration)))
+      updateSubtitles()
     }
-  }, [])
-
-  const handleSeek = useCallback((time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time
-      setCurrentTime(time)
-      setProgress(TimeFormatter.getProgressPercentage(time, audioRef.current.duration))
-    }
-  }, [])
+  }, [updateSubtitles])
 
   if (!audioUrl || !transcriptionResult) {
     return <LoadingState status={status} progress={progress} />
@@ -226,12 +220,12 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
             <PlayButton isPlaying={isPlaying} onClick={togglePlayback} />
             <ProgressBar 
               progress={progress}
-              duration={result.metadata.totalDuration}
+              duration={TimeFormatter.secondsToMs(result.metadata.totalDuration)}
               currentTime={currentTime}
               onSeek={handleSeek}
             />
             <div className="text-sm text-gray-600 min-w-[70px] tabular-nums">
-              {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(result.metadata.totalDuration)}
+              {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(TimeFormatter.secondsToMs(result.metadata.totalDuration))}
             </div>
           </div>
         </div>

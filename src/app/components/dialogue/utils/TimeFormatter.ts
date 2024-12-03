@@ -1,21 +1,30 @@
 export class TimeFormatter {
-  static formatTime(seconds: number): string {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
+  static formatTime(ms: number): string {
+    const totalSeconds = Math.floor(ms / 1000)
+    const mins = Math.floor(totalSeconds / 60)
+    const secs = Math.floor(totalSeconds % 60)
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
   static parseTime(timeString: string): number {
     const [mins, secs] = timeString.split(':').map(Number)
-    return mins * 60 + secs
+    return (mins * 60 + secs) * 1000 // Return milliseconds
   }
 
-  static getProgressPercentage(currentTime: number, duration: number): number {
-    if (duration === 0) return 0
-    return (currentTime / duration) * 100
+  static getProgressPercentage(currentTimeMs: number, durationMs: number): number {
+    if (durationMs === 0) return 0
+    return (currentTimeMs / durationMs) * 100
   }
 
-  static getTimeFromPercentage(percentage: number, duration: number): number {
-    return (percentage / 100) * duration
+  static getTimeFromPercentage(percentage: number, durationMs: number): number {
+    return Math.floor((percentage / 100) * durationMs)
+  }
+
+  static secondsToMs(seconds: number): number {
+    return Math.floor(seconds * 1000)
+  }
+
+  static msToSeconds(ms: number): number {
+    return Math.floor(ms / 1000)
   }
 }

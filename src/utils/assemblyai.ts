@@ -180,6 +180,9 @@ export class AssemblyAIProcessor {
 
       onProgress?.(100)
 
+      // Sort utterances by start time to ensure proper ordering
+      const sortedUtterances = mappedTranscript.utterances?.sort((a, b) => a.start - b.start) || []
+
       // Format the response to match our interface
       const result: TranscriptionResult = {
         text: mappedTranscript.text || '',
@@ -190,7 +193,7 @@ export class AssemblyAIProcessor {
           confidence: word.confidence || 0,
           speaker: word.speaker || null
         })),
-        subtitles: (mappedTranscript.utterances || []).map((utterance) => ({
+        subtitles: sortedUtterances.map((utterance) => ({
           text: utterance.text,
           start: utterance.start,  // Keep original milliseconds
           end: utterance.end,      // Keep original milliseconds
@@ -206,6 +209,14 @@ export class AssemblyAIProcessor {
         speakers: mappedTranscript.speakers || [],
         confidence: mappedTranscript.confidence || 0
       }
+
+      console.log('Processed transcription:', {
+        textLength: result.text.length,
+        subtitleCount: result.subtitles.length,
+        speakers: result.speakers,
+        firstSubtitle: result.subtitles[0],
+        lastSubtitle: result.subtitles[result.subtitles.length - 1]
+      })
 
       return result
 
