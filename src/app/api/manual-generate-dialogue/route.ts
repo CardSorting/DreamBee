@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { googleTTS, Character, VoiceSettings } from '../../../utils/google-tts'
+import { googleTTS, Character, VoiceSettings, AudioSegment } from '../../../utils/google-tts'
 import { s3Service } from '../../../utils/s3'
 import { redisService } from '../../../utils/redis'
 import { generateAssemblyAISRT, generateAssemblyAIVTT } from '../../../utils/subtitles'
@@ -11,6 +11,7 @@ import { chunkDialogue, validateDialogueLength } from '../../../utils/dialogue-c
 import { getAuth } from '@clerk/nextjs/server'
 import { getAudioProcessor } from '../../../utils/assemblyai'
 import { saveDraft } from '../../../utils/dynamodb/dialogue-drafts'
+import { getAudioMerger } from '../../../utils/audio-merger'
 
 const AWS_BUCKET_NAME = process.env.AWS_BUCKET_NAME
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
@@ -64,6 +65,11 @@ interface ChunkProcessingMetadata {
     timestamps?: any
   }>
   error?: string
+}
+
+async function blobToBuffer(blob: Blob): Promise<Buffer> {
+  const arrayBuffer = await blob.arrayBuffer()
+  return Buffer.from(arrayBuffer)
 }
 
 export async function POST(req: NextRequest) {
@@ -206,7 +212,7 @@ async function processDialogueChunk(
   }
 
   // Process each line with conversation flow analysis
-  const audioSegments = []
+  const audioSegments: AudioSegment[] = []
   let currentTime = 0
 
   for (let i = 0; i < chunk.dialogue.length; i++) {
@@ -264,9 +270,23 @@ async function processDialogueChunk(
     }
   })
 
-  // Process with AssemblyAI
+  // Merge audio segments
+  const audioMerger = getAudioMerger()
+  const segments = audioUrls.map((audio, index) => ({
+    url: audio.directUrl,
+    startTime: audioSegments[index].startTime,
+    endTime: audioSegments[index].endTime,
+    character: audio.character
+  }))
+
+  const mergedAudioBlob = await audioMerger.mergeAudioSegments(segments, 'preview')
+  const mergedAudioBuffer = await blobToBuffer(mergedAudioBlob)
+  const mergedAudioKey = `${dialogueId}/chunk${chunkIndex}/merged.mp3`
+  await s3Service.uploadFile(mergedAudioKey, mergedAudioBuffer, 'audio/mpeg')
+  const mergedAudioUrl = `https://${AWS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${mergedAudioKey}`
+
+  // Process with AssemblyAI using the merged audio
   const assemblyAI = getAudioProcessor()
-  const mergedAudioUrl = audioUrls[0].url // Use the first audio URL for processing
   const assemblyAiResult = await assemblyAI.generateSubtitles(
     mergedAudioUrl,
     {
