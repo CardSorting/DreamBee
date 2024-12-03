@@ -28,16 +28,6 @@ export default function DashboardLayout({
               Chat
             </Link>
             <Link 
-              href="/dashboard/auto-dialogue" 
-              className={`px-3 py-2 rounded-lg transition-colors ${
-                pathname === '/dashboard/auto-dialogue' 
-                  ? 'bg-blue-50 text-blue-600' 
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Auto Dialogue
-            </Link>
-            <Link 
               href="/dashboard/manual-dialogue" 
               className={`px-3 py-2 rounded-lg transition-colors ${
                 pathname === '/dashboard/manual-dialogue' 
