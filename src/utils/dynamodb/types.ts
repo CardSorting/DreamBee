@@ -24,7 +24,7 @@ export interface DialogueSession {
   sessionId: string
   createdAt: number
   title: string
-  description: string
+  description?: string
   characters: {
     customName: string
     voiceId: string

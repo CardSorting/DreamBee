@@ -1,6 +1,5 @@
 export interface GenerationResult {
   title: string
-  description: string
   audioUrls: Array<{
     character: string
     url: string
@@ -82,4 +81,15 @@ export interface ProgressBarProps {
 export interface PlayButtonProps {
   isPlaying: boolean
   onClick: () => void
+}
+
+export interface GenerationControlsProps {
+  title: string
+  dialogue: Array<{ character: string; text: string }>
+  genre: string
+  isGenerating: boolean
+  isPublishing: boolean
+  result: GenerationResult | null
+  onGenerate: () => void
+  onPublish: () => void
 }

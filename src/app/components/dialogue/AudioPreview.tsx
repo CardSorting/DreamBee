@@ -52,7 +52,6 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
 
       const response = await axios.post('/api/dialogue/draft', {
         title: result.title || 'Untitled Dialogue',
-        description: result.description,
         audioUrls: result.audioUrls,
         metadata: result.metadata,
         transcript: {
@@ -94,7 +93,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
         const url = URL.createObjectURL(audioBlob)
         setAudioUrl(url)
 
-        // Check if we already have AssemblyAI result in the draft
+        // Check if we already have AssemblyAI result
         if (result.assemblyAiResult?.subtitles?.length) {
           console.log('Using stored AssemblyAI result')
           setTranscriptionResult(result.assemblyAiResult)

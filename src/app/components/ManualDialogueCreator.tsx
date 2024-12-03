@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { CharacterVoice } from '../../utils/voice-config'
 import { DialogueGenre } from '../../utils/dynamodb/types/published-dialogue'
 import { DialogueSession } from '../../utils/dynamodb/types'
@@ -9,30 +9,11 @@ import { CharacterManager } from './dialogue/CharacterManager'
 import { DialogueManager } from './dialogue/DialogueManager'
 import { AudioPreview } from './dialogue/AudioPreview'
 import { GenerationControls } from './dialogue/GenerationControls'
+import { GenerationResult } from './dialogue/utils/types'
 
 export interface DialogueTurn {
   character: string
   text: string
-}
-
-interface GenerationResult {
-  title: string
-  description: string
-  audioUrls: Array<{
-    character: string
-    url: string
-    directUrl: string
-  }>
-  metadata: {
-    totalDuration: number
-    speakers: string[]
-    turnCount: number
-  }
-  transcript: {
-    srt: string
-    vtt: string
-    json: any
-  }
 }
 
 // Default character configuration
@@ -44,7 +25,6 @@ const defaultCharacter: CharacterVoice = {
 
 interface InitialData {
   title?: string
-  description?: string
   dialogue?: DialogueTurn[]
   characters?: CharacterVoice[]
 }
@@ -62,10 +42,7 @@ export default function ManualDialogueCreator({
 }) {
   // State
   const [title, setTitle] = useState(initialData?.title || '')
-  const [description, setDescription] = useState(initialData?.description || '')
   const [genre, setGenre] = useState<DialogueGenre>('Comedy')
-  const [hashtags, setHashtags] = useState<string[]>([])
-  const [hashtagInput, setHashtagInput] = useState('')
   const [characters, setCharacters] = useState<CharacterVoice[]>(
     initialData?.characters || [defaultCharacter]
   )
@@ -76,18 +53,6 @@ export default function ManualDialogueCreator({
   const [isPublishing, setIsPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
-
-  // Hashtag handlers
-  const addHashtag = () => {
-    if (hashtagInput.trim() && !hashtags.includes(hashtagInput.trim())) {
-      setHashtags([...hashtags, hashtagInput.trim()])
-      setHashtagInput('')
-    }
-  }
-
-  const removeHashtag = (tag: string) => {
-    setHashtags(hashtags.filter(t => t !== tag))
-  }
 
   // Generation handlers
   const generateDialogue = async () => {
@@ -102,7 +67,6 @@ export default function ManualDialogueCreator({
         },
         body: JSON.stringify({
           title,
-          description,
           characters,
           dialogue
         }),
@@ -153,10 +117,8 @@ export default function ManualDialogueCreator({
         },
         body: JSON.stringify({
           title,
-          description,
           genre,
-          hashtags,
-          audioUrl: result.audioUrls[0]?.url, // Use the first audio URL
+          audioUrl: result.audioUrls[0]?.url,
           dialogue,
           metadata: {
             ...result.metadata,
@@ -184,16 +146,9 @@ export default function ManualDialogueCreator({
       {/* Metadata Section */}
       <MetadataEditor
         title={title}
-        description={description}
         genre={genre}
-        hashtags={hashtags}
-        hashtagInput={hashtagInput}
         onUpdateTitle={setTitle}
-        onUpdateDescription={setDescription}
         onUpdateGenre={setGenre}
-        onUpdateHashtagInput={setHashtagInput}
-        onAddHashtag={addHashtag}
-        onRemoveHashtag={removeHashtag}
       />
 
       {/* Characters Section */}
@@ -212,10 +167,8 @@ export default function ManualDialogueCreator({
       {/* Generation Controls */}
       <GenerationControls
         title={title}
-        description={description}
         dialogue={dialogue}
         genre={genre}
-        hashtags={hashtags}
         isGenerating={isGenerating}
         isPublishing={isPublishing}
         result={result}

@@ -36,7 +36,6 @@ interface DialogueTurn {
 
 interface ManualGenerateRequest {
   title: string
-  description: string
   characters: CharacterVoice[]
   dialogue: DialogueTurn[]
 }
@@ -98,14 +97,13 @@ export async function POST(req: NextRequest) {
     const validation = validateDialogueLength(body.dialogue)
     if (!validation.isValid && validation.recommendedChunks) {
       // Split dialogue into chunks
-      const chunks = chunkDialogue(body.title, body.description, body.characters, body.dialogue)
+      const chunks = chunkDialogue(body.title, '', body.characters, body.dialogue)
 
       // Create main dialogue record
       await createManualDialogue({
         userId,
         dialogueId,
         title: body.title,
-        description: body.description,
         characters: body.characters,
         dialogue: body.dialogue,
         status: 'processing',
@@ -135,7 +133,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         dialogueId,
         title: body.title,
-        description: body.description,
         isChunked: true,
         totalChunks: chunks.length,
         firstChunkResult: result
@@ -149,7 +146,6 @@ export async function POST(req: NextRequest) {
       0,
       {
         title: body.title,
-        description: body.description,
         characters: body.characters,
         dialogue: body.dialogue,
         chunkIndex: 0,
@@ -161,7 +157,6 @@ export async function POST(req: NextRequest) {
     await saveDraft({
       userId,
       title: body.title,
-      description: body.description,
       audioUrls: result.audioUrls,
       metadata: result.metadata,
       transcript: result.transcript,
@@ -191,7 +186,6 @@ async function processDialogueChunk(
   chunkIndex: number,
   chunk: {
     title: string
-    description: string
     characters: CharacterVoice[]
     dialogue: DialogueTurn[]
     chunkIndex: number
@@ -308,7 +302,6 @@ async function processDialogueChunk(
 
   return {
     title: chunk.title,
-    description: chunk.description,
     audioUrls,
     metadata: {
       totalDuration: transcript.duration,

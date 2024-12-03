@@ -1,65 +1,67 @@
 'use client'
 
-import { DIALOGUE_GENRES, DialogueGenre } from '../../../utils/dynamodb/types/published-dialogue'
+import { DialogueTurn } from '../ManualDialogueCreator'
+import { GenerationResult } from './utils/types'
 
-interface GenerationControlsProps {
+export interface GenerationControlsProps {
   title: string
-  description: string
-  dialogue: Array<{ character: string; text: string }>
-  genre: DialogueGenre
-  hashtags: string[]
+  dialogue: DialogueTurn[]
+  genre: string
   isGenerating: boolean
   isPublishing: boolean
-  result: any | null
-  onGenerate: () => Promise<void>
-  onPublish: () => Promise<void>
+  result: GenerationResult | null
+  onGenerate: () => void
+  onPublish: () => void
 }
 
 export function GenerationControls({
   title,
-  description,
   dialogue,
   genre,
-  hashtags,
   isGenerating,
   isPublishing,
   result,
   onGenerate,
   onPublish
 }: GenerationControlsProps) {
+  const canGenerate = title.trim() && dialogue.every(turn => turn.text.trim())
+
   return (
-    <div className="flex gap-4">
+    <div className="flex justify-end space-x-4">
       <button
         onClick={onGenerate}
-        disabled={isGenerating || !title || !description || dialogue.some(turn => !turn.text)}
-        className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+        disabled={!canGenerate || isGenerating}
+        className={`px-6 py-2 rounded-lg text-white transition-colors ${
+          canGenerate && !isGenerating
+            ? 'bg-blue-600 hover:bg-blue-700'
+            : 'bg-gray-400 cursor-not-allowed'
+        }`}
       >
         {isGenerating ? (
-          <span className="flex items-center justify-center gap-2">
-            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            Generating...
-          </span>
+          <div className="flex items-center space-x-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            <span>Generating...</span>
+          </div>
         ) : (
           'Generate'
         )}
       </button>
+
       {result && (
         <button
           onClick={onPublish}
-          disabled={isPublishing || !genre || hashtags.length === 0}
-          className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          disabled={isPublishing}
+          className={`px-6 py-2 rounded-lg text-white transition-colors ${
+            !isPublishing
+              ? 'bg-green-600 hover:bg-green-700'
+              : 'bg-gray-400 cursor-not-allowed'
+          }`}
         >
           {isPublishing ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Publishing...
-            </span>
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              <span>Publishing...</span>
+            </div>
           ) : (
             'Publish'
           )}

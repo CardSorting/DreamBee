@@ -27,7 +27,7 @@ interface ManualDialogueData {
   userId: string
   dialogueId: string
   title: string
-  description: string
+  description?: string
   characters: CharacterVoice[]
   dialogue: DialogueTurn[]
   status: 'processing' | 'completed' | 'error'
