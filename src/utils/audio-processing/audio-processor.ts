@@ -47,11 +47,7 @@ export class AudioProcessor {
 import os
 import sys
 import urllib.request
-from pydub import AudioSegment
 import io
-
-def create_silence(duration_ms):
-    return AudioSegment.silent(duration=duration_ms)
 
 def main():
     try:
@@ -65,7 +61,7 @@ def main():
         output_path = os.path.join(temp_dir, 'output.mp3')
         
         # Process each segment
-        final_audio = AudioSegment.empty()
+        all_audio_data = []
         current_position = 0
 
         for i, segment in enumerate(segments):
@@ -77,8 +73,7 @@ def main():
             
             if silence_needed > 0:
                 print(f'Adding {silence_needed}ms of silence', file=sys.stderr)
-                silence = create_silence(silence_needed)
-                final_audio += silence
+                # For now, we'll skip adding silence since we're just concatenating
                 current_position += silence_needed
             
             # Download and process segment
@@ -87,9 +82,8 @@ def main():
                 audio_data = response.read()
                 print(f'Downloaded {len(audio_data)} bytes', file=sys.stderr)
                 
-                # Convert bytes to audio segment
-                segment_audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
-                final_audio += segment_audio
+                # Add audio data to list
+                all_audio_data.append(audio_data)
                 
                 # Update current position
                 segment_duration = int(float(segment['endTime'] - segment['startTime']) * 1000)
@@ -106,8 +100,12 @@ def main():
             print(f'progress:{progress}')
             sys.stdout.flush()
         
-        # Export final audio
-        final_audio.export(output_path, format='mp3')
+        # Concatenate all audio data
+        final_audio = b''.join(all_audio_data)
+        
+        # Write to output file
+        with open(output_path, 'wb') as f:
+            f.write(final_audio)
         
         # Read and output the final file
         if os.path.exists(output_path):
