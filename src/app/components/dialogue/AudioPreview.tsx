@@ -155,11 +155,11 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     })
 
     const updateSubtitles = () => {
-      const time = audioRef.current?.currentTime || 0
-      console.log('Current time:', time)
+      const timeMs = (audioRef.current?.currentTime || 0) * 1000 // Convert seconds to milliseconds
+      console.log('Current time (ms):', timeMs)
 
       const current = transcriptionResult.subtitles.find(
-        (sub: any) => time >= sub.start && time <= sub.end
+        (sub: any) => timeMs >= sub.start && timeMs <= sub.end
       )
 
       const currentIndex = current ? transcriptionResult.subtitles.indexOf(current) : -1
@@ -168,7 +168,7 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       console.log('Subtitle update:', {
         current: current?.text,
         next: next?.text,
-        time
+        timeMs
       })
 
       setCurrentSubtitle(current || null)

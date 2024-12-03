@@ -32,7 +32,7 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
                   {currentSubtitle.text || ''}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  {Math.floor(currentSubtitle.start)}s - {Math.floor(currentSubtitle.end)}s
+                  {currentSubtitle.start}ms - {currentSubtitle.end}ms
                 </div>
               </div>
             )}
@@ -50,7 +50,7 @@ const SubtitleDisplay = ({ currentSubtitle, nextSubtitle }: SubtitleDisplayProps
                   {nextSubtitle.text || ''}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  {Math.floor(nextSubtitle.start)}s - {Math.floor(nextSubtitle.end)}s
+                  {nextSubtitle.start}ms - {nextSubtitle.end}ms
                 </div>
               </div>
             )}

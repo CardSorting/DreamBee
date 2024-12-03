@@ -185,19 +185,19 @@ export class AssemblyAIProcessor {
         text: mappedTranscript.text || '',
         words: (mappedTranscript.words || []).map((word) => ({
           text: word.text,
-          start: Math.floor(word.start / 1000), // Convert milliseconds to seconds and ensure integer
-          end: Math.floor(word.end / 1000),     // Convert milliseconds to seconds and ensure integer
+          start: word.start,  // Keep original milliseconds
+          end: word.end,      // Keep original milliseconds
           confidence: word.confidence || 0,
           speaker: word.speaker || null
         })),
         subtitles: (mappedTranscript.utterances || []).map((utterance) => ({
           text: utterance.text,
-          start: Math.floor(utterance.start / 1000), // Convert milliseconds to seconds and ensure integer
-          end: Math.floor(utterance.end / 1000),     // Convert milliseconds to seconds and ensure integer
+          start: utterance.start,  // Keep original milliseconds
+          end: utterance.end,      // Keep original milliseconds
           words: (utterance.words || []).map((word) => ({
             text: word.text,
-            start: Math.floor(word.start / 1000),   // Convert milliseconds to seconds and ensure integer
-            end: Math.floor(word.end / 1000),       // Convert milliseconds to seconds and ensure integer
+            start: word.start,    // Keep original milliseconds
+            end: word.end,        // Keep original milliseconds
             confidence: word.confidence || 0,
             speaker: word.speaker || null
           })),
