@@ -47,7 +47,7 @@ export class WebAudioMerger {
       // Download all audio segments
       const buffers = await this.downloadSegments(segments)
       
-      // Use AssemblyAI's timing for total duration
+      // Calculate total duration based on actual audio durations
       const totalDuration = Math.max(...segments.map(s => s.endTime)) + 0.1 // Small padding
       const outputBuffer = this.audioContext.createBuffer(
         2, // Number of channels (stereo)
@@ -61,7 +61,7 @@ export class WebAudioMerger {
         outputData.fill(0)
       }
       
-      // Process each segment using AssemblyAI's timing
+      // Process each segment using actual audio durations
       for (let i = 0; i < segments.length; i++) {
         this.onProgress?.({
           stage: 'processing',
@@ -72,9 +72,14 @@ export class WebAudioMerger {
         
         const segment = segments[i]
         const buffer = buffers[i]
-        
-        // Use AssemblyAI's timing directly
-        const startSample = Math.floor(segment.startTime * this.audioContext.sampleRate)
+
+        // Calculate actual duration of this audio buffer
+        const segmentDuration = buffer.duration
+        const segmentStartTime = segment.startTime
+
+        // Convert time to samples
+        const startSample = Math.floor(segmentStartTime * this.audioContext.sampleRate)
+        const endSample = Math.floor((segmentStartTime + segmentDuration) * this.audioContext.sampleRate)
         
         // Copy audio data to output buffer
         for (let channel = 0; channel < Math.min(buffer.numberOfChannels, outputBuffer.numberOfChannels); channel++) {
@@ -82,7 +87,9 @@ export class WebAudioMerger {
           const outputData = outputBuffer.getChannelData(channel)
           
           for (let j = 0; j < buffer.length && startSample + j < outputData.length; j++) {
-            outputData[startSample + j] = inputData[j]
+            if (startSample + j < outputData.length) {
+              outputData[startSample + j] = inputData[j]
+            }
           }
         }
       }
