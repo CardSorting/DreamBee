@@ -32,7 +32,7 @@ export async function GET(
     // Check if table exists
     try {
       const describeTableCommand = new DescribeTableCommand({
-        TableName: 'UserDialogues'
+        TableName: process.env.DYNAMODB_TABLE!
       })
       await rawClient.send(describeTableCommand)
       console.log('Table exists and is accessible')
@@ -67,7 +67,7 @@ export async function GET(
 
     // Query using GSI1 to get user's published dialogues
     const queryParams = {
-      TableName: 'UserDialogues',
+      TableName: process.env.DYNAMODB_TABLE!,
       IndexName: 'GSI1',
       KeyConditionExpression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
       ExpressionAttributeValues: {
@@ -98,31 +98,26 @@ export async function GET(
 
     // Create the response object with proper typing
     const response: PublishedResponse = {
-      dialogues,
+      dialogues: dialogues.map(dialogue => ({
+        ...dialogue,
+        audioUrl: dialogue.audioUrl // Use the audioUrl directly from the record
+      })),
       pagination: {
         page,
         limit,
-        hasMore: !!result.LastEvaluatedKey
+        hasMore: !!result.LastEvaluatedKey,
+        ...(result.LastEvaluatedKey && {
+          nextCursor: encodeURIComponent(JSON.stringify(result.LastEvaluatedKey))
+        })
       }
-    }
-
-    // Include cursor for next page if available
-    if (result.LastEvaluatedKey) {
-      response.pagination.nextCursor = encodeURIComponent(
-        JSON.stringify(result.LastEvaluatedKey)
-      )
     }
 
     return NextResponse.json(response)
   } catch (error) {
-    console.error('Error in published dialogues API:', {
+    console.error('Error fetching published dialogues:', {
       error,
       message: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
-      params: {
-        userId: params.userId,
-        url: request.url
-      }
     })
     return new NextResponse(
       JSON.stringify({ 

@@ -42,7 +42,7 @@ export class WebAudioMerger {
     return buffers
   }
 
-  async mergeAudioSegments(segments: AudioSegmentInfo[]): Promise<Blob> {
+  async mergeAudioSegments(segments: AudioSegmentInfo[]): Promise<{ blob: Blob, timingAdjustments: { [key: string]: number } }> {
     try {
       // Download all audio segments
       const buffers = await this.downloadSegments(segments)
@@ -56,7 +56,8 @@ export class WebAudioMerger {
         return {
           ...segment,
           adjustedStartTime: startTime,
-          duration: buffer.duration
+          duration: buffer.duration,
+          timeOffset: startTime - segment.startTime // Calculate time offset
         }
       })
       
@@ -115,16 +116,19 @@ export class WebAudioMerger {
           }
         }
       }
-      
-      // Convert to WAV format
+
+      // Create timing adjustments map for subtitle synchronization
+      const timingAdjustments = adjustedSegments.reduce((acc, segment) => {
+        acc[segment.character] = segment.timeOffset
+        return acc
+      }, {} as { [key: string]: number })
+
+      // Convert to WAV format and return with timing adjustments
       const wavData = this.audioBufferToWav(outputBuffer)
-      
-      this.onProgress?.({
-        stage: 'complete',
-        progress: 100
-      })
-      
-      return new Blob([wavData], { type: 'audio/wav' })
+      return {
+        blob: new Blob([wavData], { type: 'audio/wav' }),
+        timingAdjustments
+      }
     } catch (error) {
       if (error instanceof Error) {
         throw error

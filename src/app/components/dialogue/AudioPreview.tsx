@@ -7,6 +7,8 @@ import { PlayButton } from './components/PlayButton'
 import { ProgressBar } from './components/ProgressBar'
 import SubtitleDisplay from './components/SubtitleDisplay'
 import { SimpleAudioPlayer } from './components/SimpleAudioPlayer'
+import { useAuth as useClerkAuth } from '@clerk/nextjs'
+import type { MergeProgress } from '../../../utils/audio-merger'
 
 const BASE_BUFFER_MS = 2000 // 2 second base buffer
 const LOOKAHEAD_BUFFER_MS = 4000 // 4 second lookahead
@@ -49,239 +51,135 @@ const createEmptySubtitle = (id: string): Subtitle => ({
   words: []
 })
 
-export function AudioPreview({ result, onError }: AudioPreviewProps) {
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [progress, setProgress] = useState<number>(0)
-  const [status, setStatus] = useState<string>('Initializing')
-  const [currentTime, setCurrentTime] = useState(0)
-  const [transcriptionResult, setTranscriptionResult] = useState<any>(null)
-  const [currentSubtitle, setCurrentSubtitle] = useState<Subtitle>(() => createEmptySubtitle('initial'))
+function AudioPreview({ result, onError }: AudioPreviewProps) {
+  const { userId } = useClerkAuth()
+  const [audioUrl, setAudioUrl] = useState<string>('')
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState('')
+  const [processingProgress, setProcessingProgress] = useState(0)
+  const [currentSubtitle, setCurrentSubtitle] = useState<Subtitle | null>(null)
   const [nextSubtitle, setNextSubtitle] = useState<Subtitle | null>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
-  const processingRef = useRef(false)
-  const sortedSubtitlesRef = useRef<Subtitle[]>([])
-  const lastSubtitleRef = useRef<Subtitle>(createEmptySubtitle('last'))
-  const preloadedSubtitlesRef = useRef<Subtitle[]>([])
+  const [subtitles, setSubtitles] = useState<Subtitle[]>([])
+  const [timingAdjustments, setTimingAdjustments] = useState<{ [key: string]: number }>({})
 
-  const handleError = useCallback((error: Error) => {
-    console.error('Processing error:', error.message)
-    onError(error.message)
-  }, [onError])
+  const audioProcessor = useRef(getAudioProcessor())
+  const webAudioMerger = useRef(getWebAudioMerger())
 
-  const calculateDynamicBuffer = useCallback((subtitle: Subtitle | null) => {
-    // Calculate buffer based on subtitle length
-    const textLength = subtitle?.text?.length || 0
-    return BASE_BUFFER_MS + (textLength * CHAR_BUFFER_MS)
-  }, [])
-
-  const preloadSubtitles = useCallback((timeMs: number) => {
-    if (!sortedSubtitlesRef.current.length) return []
-
-    const lookAheadTime = timeMs + LOOKAHEAD_BUFFER_MS
-    return sortedSubtitlesRef.current.filter(
-      sub => sub.start >= timeMs && sub.start <= lookAheadTime
-    )
-  }, [])
-
-  const updateSubtitles = useCallback(() => {
-    if (!transcriptionResult?.subtitles?.length) {
-      return
-    }
-
-    const timeMs = audioRef.current ? TimeFormatter.secondsToMs(audioRef.current.currentTime) : 0
-    const durationMs = audioRef.current ? TimeFormatter.secondsToMs(audioRef.current.duration) : 0
-
-    // Preload upcoming subtitles
-    preloadedSubtitlesRef.current = preloadSubtitles(timeMs)
-    console.log('Preloaded subtitles:', preloadedSubtitlesRef.current.length)
-
-    // First check preloaded subtitles
-    let current: Subtitle = createEmptySubtitle('current')
-    if (preloadedSubtitlesRef.current[0]) {
-      // Calculate dynamic buffer based on subtitle length
-      const dynamicBuffer = calculateDynamicBuffer(preloadedSubtitlesRef.current[0])
-      const bufferedTimeMs = timeMs + dynamicBuffer
-
-      // Check if we should show this subtitle yet
-      if (bufferedTimeMs >= preloadedSubtitlesRef.current[0].start) {
-        current = preloadedSubtitlesRef.current[0]
-      }
-    }
-
-    // If no subtitle found in preloaded, check all subtitles
-    if (!current.text) {
-      const dynamicBuffer = BASE_BUFFER_MS // Use base buffer for searching
-      const bufferedTimeMs = timeMs + dynamicBuffer
-      const foundSubtitle = sortedSubtitlesRef.current.find(
-        sub => bufferedTimeMs >= sub.start && bufferedTimeMs <= sub.end
-      )
-      if (foundSubtitle) {
-        current = foundSubtitle
-      }
-    }
-
-    // If no current subtitle is found:
-    if (!current.text) {
-      if (timeMs === 0 && sortedSubtitlesRef.current.length > 0) {
-        // At the start, show first subtitle
-        const firstSubtitle = sortedSubtitlesRef.current[0]
-        setCurrentSubtitle(firstSubtitle)
-        lastSubtitleRef.current = firstSubtitle
-        return
-      } else if (timeMs >= durationMs - 100 && sortedSubtitlesRef.current.length > 0) {
-        // At the end, show last subtitle
-        const lastIndex = sortedSubtitlesRef.current.length - 1
-        const lastSubtitle = sortedSubtitlesRef.current[lastIndex]
-        setCurrentSubtitle(lastSubtitle)
-        lastSubtitleRef.current = lastSubtitle
-        return
-      } else if (lastSubtitleRef.current) {
-        // Show the last known subtitle if no current subtitle is found
-        setCurrentSubtitle(lastSubtitleRef.current)
-        return
-      }
-    }
-
-    console.log('Subtitle update:', {
-      current: current?.text,
-      timeMs,
-      buffer: calculateDynamicBuffer(current),
-      preloadedCount: preloadedSubtitlesRef.current.length,
-      totalSubtitles: sortedSubtitlesRef.current.length
-    })
-
-    if (current.text) {
-      lastSubtitleRef.current = current
-      setCurrentSubtitle(current)
-    } else {
-      setCurrentSubtitle(lastSubtitleRef.current)
-    }
-  }, [transcriptionResult, preloadSubtitles, calculateDynamicBuffer])
-
-  const handleTimeUpdate = useCallback(() => {
-    if (audioRef.current) {
-      const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
-      const durationMs = TimeFormatter.secondsToMs(audioRef.current.duration)
-      setCurrentTime(timeMs)
-      setProgress(TimeFormatter.getProgressPercentage(timeMs, durationMs))
-      updateSubtitles()
-    }
-  }, [updateSubtitles])
-
-  const processAudioAndSubtitles = useCallback(async () => {
-    if (processingRef.current || !result?.audioUrls) return
-    processingRef.current = true
-
-    try {
-      setStatus('Processing audio')
-      const audioMerger = getWebAudioMerger((progress) => {
-        setStatus(`${progress.stage === 'loading' ? 'Loading' : 'Processing'} audio`)
-        setProgress(progress.progress)
-      })
-
-      // Convert audioUrls to segments
-      const segments = result.audioUrls.map((audio, index, array) => ({
-        url: audio.directUrl,
-        startTime: index * 2, // Add 2 seconds gap between segments
-        endTime: (index + 1) * 2,
-        character: audio.character,
-        previousCharacter: index > 0 ? array[index - 1].character : undefined
-      }))
-
-      const audioBlob = await audioMerger.mergeAudioSegments(segments)
-      const url = URL.createObjectURL(audioBlob)
-      setAudioUrl(url)
-      setStatus('Ready')
-      setProgress(100)
-
-      // Process transcription result if available
-      if (result.assemblyAiResult) {
-        const processedSubtitles: Subtitle[] = result.assemblyAiResult.subtitles
-          .sort((a, b) => a.start - b.start)
-          .map((sub, index) => ({
-            ...sub,
-            id: `subtitle_${index}_${Date.now()}`
-          }))
-        
-        sortedSubtitlesRef.current = processedSubtitles
-        setTranscriptionResult(result.assemblyAiResult)
-
-        // Initialize with first subtitle
-        if (processedSubtitles.length > 0) {
-          const firstSubtitle = processedSubtitles[0]
-          setCurrentSubtitle(firstSubtitle)
-          lastSubtitleRef.current = firstSubtitle
-          // Preload initial subtitles
-          preloadedSubtitlesRef.current = preloadSubtitles(0)
-        }
-      }
-    } catch (error) {
-      handleError(error instanceof Error ? error : new Error('Unknown error occurred'))
-    } finally {
-      processingRef.current = false
-    }
-  }, [result, handleError, preloadSubtitles])
-
-  const togglePlayback = useCallback(() => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause()
-      } else {
-        audioRef.current.play().catch(error => {
-          handleError(new Error('Failed to play audio: ' + error.message))
-        })
-      }
-      setIsPlaying(!isPlaying)
-    }
-  }, [isPlaying, handleError])
-
-  const handleSeek = useCallback((timeMs: number) => {
-    if (audioRef.current) {
-      const seconds = TimeFormatter.msToSeconds(timeMs)
-      audioRef.current.currentTime = seconds
-      setCurrentTime(timeMs)
-      setProgress(TimeFormatter.getProgressPercentage(timeMs, TimeFormatter.secondsToMs(audioRef.current.duration)))
-      // Preload subtitles for new position
-      preloadedSubtitlesRef.current = preloadSubtitles(timeMs)
-      updateSubtitles()
-    }
-  }, [updateSubtitles, preloadSubtitles])
-
-  const handleEnded = useCallback(() => {
-    setIsPlaying(false)
-    // Show last subtitle when playback ends
-    if (sortedSubtitlesRef.current.length > 0) {
-      const lastSubtitle = sortedSubtitlesRef.current[sortedSubtitlesRef.current.length - 1]
-      setCurrentSubtitle(lastSubtitle)
-      lastSubtitleRef.current = lastSubtitle
-    }
+  const handleMergeProgress = useCallback((progress: MergeProgress) => {
+    setProcessingStatus(progress.stage)
+    setProcessingProgress(progress.progress)
   }, [])
 
   useEffect(() => {
-    processAudioAndSubtitles()
+    if (!result?.audioUrls || result.audioUrls.length === 0) return
 
+    const processAudio = async () => {
+      try {
+        setIsProcessing(true)
+        
+        // Create audio segments from the result
+        const audioSegments = result.audioUrls.map((audio, index) => ({
+          url: audio.directUrl,
+          startTime: index * 2000, // 2 second gap between segments
+          endTime: (index + 1) * 2000,
+          character: audio.character,
+          previousCharacter: index > 0 ? result.audioUrls[index - 1].character : undefined
+        }))
+
+        const mergeResult = await webAudioMerger.current.mergeAudioSegments(audioSegments)
+        setTimingAdjustments(mergeResult.timingAdjustments)
+
+        // Create object URL for the merged audio blob
+        const url = URL.createObjectURL(mergeResult.blob)
+        setAudioUrl(url)
+
+        // Process with AssemblyAI
+        if (userId) {
+          const response = await audioProcessor.current.processAudioWithQueue(
+            url,
+            {
+              speakerDetection: true,
+              wordTimestamps: true,
+              speakerNames: result.audioUrls.map(a => a.character),
+              userId: userId
+            },
+            (progress: number) => {
+              setProcessingProgress(progress)
+              setProcessingStatus('Generating transcription')
+            }
+          )
+
+          if (response?.subtitles) {
+            const processedSubtitles = response.subtitles.map((sub: AssemblyAISubtitle, index: number) => ({
+              id: `subtitle-${index}`,
+              text: sub.text,
+              start: sub.start,
+              end: sub.end,
+              words: sub.words || [],
+              speaker: sub.speaker || 'Speaker'
+            }))
+            setSubtitles(processedSubtitles)
+          }
+        }
+      } catch (error) {
+        console.error('Error processing audio:', error)
+        onError(error instanceof Error ? error.message : 'An unknown error occurred')
+      } finally {
+        setIsProcessing(false)
+      }
+    }
+
+    processAudio()
+  }, [result?.audioUrls, userId, onError])
+
+  // Cleanup
+  useEffect(() => {
     return () => {
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl)
       }
     }
-  }, [processAudioAndSubtitles])
+  }, [audioUrl])
 
-  if (!audioUrl || !transcriptionResult) {
-    return <LoadingState status={status} progress={progress} />
+  const handleTimeUpdate = useCallback((currentTime: number) => {
+    if (!subtitles.length) return
+
+    // Find current subtitle
+    const current = subtitles.find(subtitle => 
+      currentTime >= subtitle.start / 1000 && currentTime <= subtitle.end / 1000
+    )
+
+    // Find next subtitle
+    const nextIndex = subtitles.findIndex(subtitle => subtitle.start / 1000 > currentTime)
+    const next = nextIndex !== -1 ? subtitles[nextIndex] : null
+
+    setCurrentSubtitle(current || null)
+    setNextSubtitle(next)
+  }, [subtitles])
+
+  if (isProcessing) {
+    return <LoadingState status={processingStatus} progress={processingProgress} />
+  }
+
+  if (!audioUrl) {
+    return null
   }
 
   return (
-    <div className="bg-gray-100 rounded-lg shadow-sm">
+    <div className="w-full space-y-4">
+      {/* Subtitle Display */}
+      {subtitles.length > 0 && currentSubtitle && (
+        <SubtitleDisplay
+          currentSubtitle={currentSubtitle}
+          nextSubtitle={nextSubtitle}
+          currentTime={0}
+        />
+      )}
+      
+      {/* Audio Player */}
       <SimpleAudioPlayer
         audioUrl={audioUrl}
-        transcript={{
-          json: {
-            subtitles: sortedSubtitlesRef.current
-          }
-        }}
-        onPlay={() => {}}
+        onTimeUpdate={handleTimeUpdate}
       />
     </div>
   )

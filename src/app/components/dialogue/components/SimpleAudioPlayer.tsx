@@ -1,142 +1,95 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
-import { TimeFormatter } from '../utils/TimeFormatter'
-import { PlayButton } from './PlayButton'
-import { ProgressBar } from './ProgressBar'
-import SubtitleDisplay from './SubtitleDisplay'
-import { Subtitle } from '../utils/types'
+import React, { useEffect, useRef, useState } from 'react';
+import { PlayIcon, PauseIcon } from '@heroicons/react/24/solid';
+import { ProgressBar } from './ProgressBar';
 
 interface SimpleAudioPlayerProps {
-  audioUrl: string
-  transcript?: {
-    json?: {
-      subtitles?: Array<{
-        text: string
-        start: number
-        end: number
-        words?: Array<{
-          text: string
-          start: number
-          end: number
-          confidence: number
-          speaker?: string | null
-        }>
-        speaker?: string | null
-      }>
-    }
-  }
-  onPlay?: () => void
+  audioUrl: string;
+  onTimeUpdate?: (currentTime: number) => void;
+  onEnded?: () => void;
 }
 
-export function SimpleAudioPlayer({ audioUrl, transcript, onPlay }: SimpleAudioPlayerProps) {
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [currentSubtitle, setCurrentSubtitle] = useState<Subtitle | null>(null)
-  const [nextSubtitle, setNextSubtitle] = useState<Subtitle | null>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
-  const subtitlesRef = useRef<Subtitle[]>([])
-
-  // Convert AssemblyAI subtitles to our format
-  useEffect(() => {
-    console.log('Transcript data:', transcript)
-    if (transcript?.json?.subtitles) {
-      console.log('Found subtitles:', transcript.json.subtitles)
-      subtitlesRef.current = transcript.json.subtitles
-        .filter(sub => sub && typeof sub.text === 'string' && typeof sub.start === 'number' && typeof sub.end === 'number')
-        .map((sub, index) => ({
-          id: `subtitle-${index}`,
-          text: sub.text,
-          start: sub.start,
-          end: sub.end,
-          words: sub.words,
-          speaker: sub.speaker
-        }))
-      console.log('Processed subtitles:', subtitlesRef.current)
-    }
-  }, [transcript])
-
-  const handleTimeUpdate = useCallback(() => {
-    if (!audioRef.current) return
-
-    const timeMs = TimeFormatter.secondsToMs(audioRef.current.currentTime)
-    const durationMs = TimeFormatter.secondsToMs(audioRef.current.duration)
-    
-    setCurrentTime(timeMs)
-    setProgress((timeMs / durationMs) * 100)
-
-    // Find current and next subtitles
-    const current = subtitlesRef.current.find(
-      sub => timeMs >= sub.start && timeMs <= sub.end
-    )
-    const next = subtitlesRef.current.find(
-      sub => timeMs < sub.start
-    )
-
-    setCurrentSubtitle(current || null)
-    setNextSubtitle(next || null)
-  }, [])
-
-  const handlePlay = useCallback(() => {
-    if (!audioRef.current) return
-    
-    if (isPlaying) {
-      audioRef.current.pause()
-    } else {
-      audioRef.current.play()
-      onPlay?.()
-    }
-  }, [isPlaying, onPlay])
-
-  const handleSeek = useCallback((timeMs: number) => {
-    if (!audioRef.current) return
-    audioRef.current.currentTime = TimeFormatter.msToSeconds(timeMs)
-  }, [])
+export const SimpleAudioPlayer: React.FC<SimpleAudioPlayerProps> = ({
+  audioUrl,
+  onTimeUpdate,
+  onEnded,
+}) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) return
+    const audio = audioRef.current;
+    if (!audio) return;
 
-    const handlePlayState = () => setIsPlaying(!audio.paused)
-    
-    audio.addEventListener('play', handlePlayState)
-    audio.addEventListener('pause', handlePlayState)
-    audio.addEventListener('timeupdate', handleTimeUpdate)
-    
+    const handleLoadedMetadata = () => {
+      setDuration(audio.duration);
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+      onTimeUpdate?.(audio.currentTime);
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      onEnded?.();
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+
     return () => {
-      audio.removeEventListener('play', handlePlayState)
-      audio.removeEventListener('pause', handlePlayState)
-      audio.removeEventListener('timeupdate', handleTimeUpdate)
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [onTimeUpdate, onEnded]);
+
+  const togglePlayPause = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
     }
-  }, [handleTimeUpdate])
+  };
+
+  const handleSeek = (time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
+  };
+
+  const progress = duration ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="w-full space-y-4">
-      <audio
-        ref={audioRef}
-        src={audioUrl}
-        preload="metadata"
-        className="hidden"
-      />
-      
-      {/* Subtitle Display */}
-      {subtitlesRef.current.length > 0 && (
-        <SubtitleDisplay
-          currentSubtitle={currentSubtitle || { id: '', text: '', start: 0, end: 0 }}
-          nextSubtitle={nextSubtitle}
-          currentTime={currentTime}
-        />
-      )}
-      
-      {/* Controls */}
-      <div className="flex items-center gap-4">
-        <PlayButton isPlaying={isPlaying} onClick={handlePlay} />
+    <div className="flex items-center space-x-4 w-full max-w-md p-4 bg-white rounded-lg shadow">
+      <button
+        onClick={togglePlayPause}
+        className="w-10 h-10 flex items-center justify-center bg-blue-500 hover:bg-blue-600 rounded-full text-white focus:outline-none"
+      >
+        {isPlaying ? (
+          <PauseIcon className="w-5 h-5" />
+        ) : (
+          <PlayIcon className="w-5 h-5" />
+        )}
+      </button>
+      <div className="flex-1">
         <ProgressBar
+          ref={progressBarRef}
           progress={progress}
-          duration={audioRef.current?.duration ? TimeFormatter.secondsToMs(audioRef.current.duration) : 0}
+          duration={duration}
           currentTime={currentTime}
           onSeek={handleSeek}
         />
       </div>
+      <audio ref={audioRef} src={audioUrl} preload="metadata" />
     </div>
-  )
-}
+  );
+};

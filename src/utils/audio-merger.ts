@@ -9,7 +9,7 @@ export interface AudioSegmentInfo {
   rate?: number
 }
 
-interface MergeProgress {
+export interface MergeProgress {
   stage: 'loading' | 'processing' | 'complete' | 'queued'
   progress: number
   segmentIndex?: number

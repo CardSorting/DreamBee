@@ -1,5 +1,7 @@
 import { getAudioMerger, AudioSegmentInfo } from './audio-merger'
 import { getAudioProcessor } from './assemblyai'
+import { persistAudioBlob } from './audio-persistence'
+import { auth } from '@clerk/nextjs'
 
 export interface ProcessingStatus {
   stage: 'prefetch' | 'processing' | 'normalizing' | 'complete'
@@ -25,7 +27,7 @@ function convertMergeProgressToProcessingStatus(progress: any): ProcessingStatus
   }
 }
 
-export function getCompatibleAudioMerger(onProgress?: (status: ProcessingStatus | null) => void) {
+export async function getCompatibleAudioMerger(onProgress?: (status: ProcessingStatus | null) => void) {
   const originalAudioMerger = getAudioMerger((progress: any) => {
     if (onProgress) {
       onProgress(convertMergeProgressToProcessingStatus(progress))
@@ -35,7 +37,20 @@ export function getCompatibleAudioMerger(onProgress?: (status: ProcessingStatus 
   return {
     ...originalAudioMerger,
     mergeAudioSegments: async (segments: AudioSegmentInfo[], conversationId: string) => {
-      return await originalAudioMerger.mergeAudioSegments(segments, conversationId)
+      const result = await originalAudioMerger.mergeAudioSegments(segments, conversationId)
+      
+      // Get the current user's ID
+      const { userId } = auth();
+      
+      if (userId && result.blob) {
+        // Persist the merged audio
+        await persistAudioBlob(result.blob, userId, {
+          segments,
+          conversationId
+        });
+      }
+      
+      return result;
     }
   }
 }
@@ -46,13 +61,26 @@ export async function processAudioFile(
     speakerDetection?: boolean
     wordTimestamps?: boolean
     speakerNames?: string[]
+    userId?: string
   } = {},
   onProgress?: (progress: number) => void
 ) {
   try {
     const processor = getAudioProcessor()
-    // Use the queue-based processing instead of direct processing
-    return await processor.processAudioWithQueue(audioUrl, options, onProgress)
+    const result = await processor.processAudioWithQueue(audioUrl, options, onProgress)
+
+    // If we have a userId, persist the processed audio
+    if (options.userId) {
+      const response = await fetch(audioUrl);
+      const blob = await response.blob();
+      
+      await persistAudioBlob(blob, options.userId, {
+        transcription: result,
+        segments: options.speakerNames
+      });
+    }
+
+    return result;
   } catch (error: any) {
     console.error('Error processing audio file:', error)
     throw error
