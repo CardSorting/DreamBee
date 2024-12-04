@@ -50,10 +50,24 @@ export interface UserPublishedDialogue extends BaseItem {
     turnCount: number
     createdAt: number
   }
-  transcript: {
+  transcript?: {
     srt: string
     vtt: string
-    json: any
+    json: {
+      subtitles: Array<{
+        text: string
+        start: number
+        end: number
+        words?: Array<{
+          text: string
+          start: number
+          end: number
+          confidence: number
+          speaker?: string | null
+        }>
+        speaker?: string | null
+      }>
+    }
   }
   stats: {
     likes: number

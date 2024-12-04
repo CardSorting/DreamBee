@@ -6,6 +6,7 @@ import { AudioPreviewProps, Subtitle } from './utils/types'
 import { PlayButton } from './components/PlayButton'
 import { ProgressBar } from './components/ProgressBar'
 import SubtitleDisplay from './components/SubtitleDisplay'
+import { SimpleAudioPlayer } from './components/SimpleAudioPlayer'
 
 const BASE_BUFFER_MS = 2000 // 2 second base buffer
 const LOOKAHEAD_BUFFER_MS = 4000 // 4 second lookahead
@@ -273,35 +274,14 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
 
   return (
     <div className="bg-gray-100 rounded-lg shadow-sm">
-      <div className="flex flex-col">
-        <div className="p-4 border-b border-gray-200">
-          <div className="flex items-center space-x-4 h-12">
-            <PlayButton isPlaying={isPlaying} onClick={togglePlayback} />
-            <ProgressBar 
-              progress={progress}
-              duration={TimeFormatter.secondsToMs(result.metadata.totalDuration)}
-              currentTime={currentTime}
-              onSeek={handleSeek}
-            />
-            <div className="text-sm text-gray-600 min-w-[70px] tabular-nums">
-              {TimeFormatter.formatTime(currentTime)} / {TimeFormatter.formatTime(TimeFormatter.secondsToMs(result.metadata.totalDuration))}
-            </div>
-          </div>
-        </div>
-        <div className="p-2">
-          <SubtitleDisplay 
-            currentSubtitle={currentSubtitle}
-            nextSubtitle={null}
-            currentTime={currentTime}
-          />
-        </div>
-      </div>
-      <audio
-        ref={audioRef}
-        src={audioUrl}
-        onEnded={handleEnded}
-        onTimeUpdate={handleTimeUpdate}
-        onError={() => handleError(new Error('Failed to play audio'))}
+      <SimpleAudioPlayer
+        audioUrl={audioUrl}
+        transcript={{
+          json: {
+            subtitles: sortedSubtitlesRef.current
+          }
+        }}
+        onPlay={() => {}}
       />
     </div>
   )

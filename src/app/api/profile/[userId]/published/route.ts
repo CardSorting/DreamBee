@@ -74,6 +74,11 @@ export async function GET(
         ':pk': `USER#${userId}`,
         ':sk': 'PUBLISHED#'
       },
+      ProjectionExpression: 'pk, sk, gsi1pk, gsi1sk, #type, userId, dialogueId, title, subtitle, description, genre, hashtags, audioUrl, metadata, #transcript, stats, createdAt, updatedAt, publishedAt, isPublished',
+      ExpressionAttributeNames: {
+        '#type': 'type',
+        '#transcript': 'transcript'
+      },
       Limit: limit,
       ExclusiveStartKey: exclusiveStartKey,
       ScanIndexForward: false // Get newest first

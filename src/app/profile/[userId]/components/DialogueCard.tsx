@@ -1,6 +1,5 @@
 import { UserPublishedDialogue } from '../../../../utils/dynamodb/types/user-profile'
-import { AudioPreview } from '../../../components/dialogue/AudioPreview'
-import { GenerationResult } from '../../../components/dialogue/utils/types'
+import { SimpleAudioPlayer } from '../../../components/dialogue/components/SimpleAudioPlayer'
 import { useState, useEffect } from 'react'
 import { fetchProfile } from '../utils/profile-utils'
 import Link from 'next/link'
@@ -39,22 +38,14 @@ export function DialogueCard({ dialogue }: DialogueCardProps) {
     }
   }
 
-  // Format the data for AudioPreview using existing S3 and DynamoDB data
-  const audioPreviewData: GenerationResult = {
+  console.log('Dialogue transcript:', dialogue.transcript)
+  console.log('Dialogue data:', {
+    id: dialogue.dialogueId,
     title: dialogue.title,
-    // Use the stored audio URL directly
-    audioUrls: [{
-      directUrl: dialogue.audioUrl,
-      url: dialogue.audioUrl,
-      character: dialogue.metadata?.speakers?.[0] || 'Speaker'
-    }],
-    // Use the stored metadata
-    metadata: dialogue.metadata,
-    // Use the stored transcript files
     transcript: dialogue.transcript,
-    // Use the stored AssemblyAI result
-    assemblyAiResult: dialogue.transcript?.json
-  }
+    transcriptJson: dialogue.transcript?.json,
+    subtitles: dialogue.transcript?.json?.subtitles
+  })
 
   return (
     <div className="bg-white rounded-lg shadow p-4">
@@ -106,10 +97,9 @@ export function DialogueCard({ dialogue }: DialogueCardProps) {
         ))}
       </div>
       <div className="mt-4">
-        <audio 
-          controls 
-          src={dialogue.audioUrl}
-          className="w-full"
+        <SimpleAudioPlayer
+          audioUrl={dialogue.audioUrl}
+          transcript={dialogue.transcript}
           onPlay={handlePlay}
         />
       </div>

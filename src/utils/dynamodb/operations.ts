@@ -19,7 +19,21 @@ interface PublishDialogueParams {
   transcript?: {
     srt: string
     vtt: string
-    json: any
+    json: {
+      subtitles: Array<{
+        text: string
+        start: number
+        end: number
+        words?: Array<{
+          text: string
+          start: number
+          end: number
+          confidence: number
+          speaker?: string | null
+        }>
+        speaker?: string | null
+      }>
+    }
   }
 }
 
@@ -47,7 +61,8 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<Pu
     stats: {
       likes: 0,
       dislikes: 0,
-      comments: 0
+      comments: 0,
+      plays: 0
     },
     createdAt: publishedAt,
     updatedAt: publishedAt
@@ -69,6 +84,11 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<Pu
     transcript: params.transcript,
     publishedAt,
     sortKey: `DIALOGUE#${timestamp}#${params.dialogueId}`,
+    gsi1pk: `USER#${params.userId}`,
+    gsi1sk: `PUBLISHED#${timestamp}`,
+    isPublished: true,
+    createdAt: publishedAt,
+    updatedAt: publishedAt,
     stats: {
       likes: 0,
       dislikes: 0,

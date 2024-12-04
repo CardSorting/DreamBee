@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { AssemblyAI, Transcript } from 'assemblyai'
+import { audioQueue } from './audio-processing-queue'
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY
 const ASSEMBLYAI_API_URL = 'https://api.assemblyai.com/v2'
@@ -32,6 +33,13 @@ interface TranscriptionResult {
   subtitles: Subtitle[]
   speakers: string[]
   confidence: number
+  simpleAudioPlayerTranscript: {
+    srt: string
+    vtt: string
+    json: {
+      subtitles: Subtitle[]
+    }
+  }
 }
 
 // Our internal transcript type that matches the actual API response
@@ -124,6 +132,42 @@ export class AssemblyAIProcessor {
     throw new Error('Transcription timed out')
   }
 
+  private async handleError(error: any): Promise<never> {
+    console.error('AssemblyAI API Error:', error)
+
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status
+      const errorMessage = error.response?.data?.error || error.message
+
+      if (status === 429) {
+        throw new Error('Rate limit exceeded. Please try again in about an hour. (AssemblyAI API rate limit)')
+      } else if (status === 401) {
+        throw new Error('Invalid API key or authentication error. Please check your AssemblyAI API key.')
+      } else if (status === 400) {
+        throw new Error(`Bad request: ${errorMessage}`)
+      } else if (status === 500) {
+        throw new Error('AssemblyAI service error. Please try again later.')
+      }
+    }
+
+    throw new Error('An unexpected error occurred while processing audio: ' + (error.message || 'Unknown error'))
+  }
+
+  private async waitWithRetry(transcriptId: string, retryCount = 0, maxRetries = 3): Promise<ProcessedTranscript> {
+    try {
+      return await this.waitForTranscript(transcriptId)
+    } catch (error: any) {
+      if (axios.isAxiosError(error) && error.response?.status === 429 && retryCount < maxRetries) {
+        // Wait for exponential backoff time before retrying
+        const waitTime = Math.pow(2, retryCount) * 1000
+        console.log(`Rate limit hit, waiting ${waitTime}ms before retry ${retryCount + 1}/${maxRetries}`)
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+        return this.waitWithRetry(transcriptId, retryCount + 1, maxRetries)
+      }
+      throw error
+    }
+  }
+
   async generateSubtitles(
     audioUrl: string,
     options: {
@@ -173,7 +217,7 @@ export class AssemblyAIProcessor {
 
       // Wait for transcription to complete
       console.log('Waiting for transcription to complete...')
-      const transcript = await this.waitForTranscript(transcriptionResponse.id)
+      const transcript = await this.waitWithRetry(transcriptionResponse.id)
 
       onProgress?.(75)
 
@@ -242,7 +286,7 @@ export class AssemblyAIProcessor {
               speakerMap.set(utterance.speaker, speakerNames[characterIndex])
             }
           }
-        })
+        });
 
         // Replace speaker labels with character names
         mappedTranscript.utterances = mappedTranscript.utterances.map((utterance) => ({
@@ -262,6 +306,21 @@ export class AssemblyAIProcessor {
       // Sort utterances by start time
       const sortedUtterances = [...(mappedTranscript.utterances || [])].sort((a, b) => a.start - b.start)
 
+      // Create subtitles array first
+      const subtitles = sortedUtterances.map((utterance) => ({
+        text: utterance.text,
+        start: utterance.start,
+        end: utterance.end,
+        words: (utterance.words || []).map((word) => ({
+          text: word.text,
+          start: word.start,
+          end: word.end,
+          confidence: word.confidence || 0,
+          speaker: word.speaker || null
+        })),
+        speaker: utterance.speaker || null
+      }))
+
       // Format the response to match our interface
       const result: TranscriptionResult = {
         text: mappedTranscript.text || '',
@@ -272,21 +331,16 @@ export class AssemblyAIProcessor {
           confidence: word.confidence || 0,
           speaker: word.speaker || null
         })),
-        subtitles: sortedUtterances.map((utterance) => ({
-          text: utterance.text,
-          start: utterance.start,
-          end: utterance.end,
-          words: (utterance.words || []).map((word) => ({
-            text: word.text,
-            start: word.start,
-            end: word.end,
-            confidence: word.confidence || 0,
-            speaker: word.speaker || null
-          })),
-          speaker: utterance.speaker || null
-        })),
+        subtitles,
         speakers: mappedTranscript.speakers || [],
-        confidence: mappedTranscript.confidence || 0
+        confidence: mappedTranscript.confidence || 0,
+        simpleAudioPlayerTranscript: {
+          srt: '', // We'll generate this if needed
+          vtt: '', // We'll generate this if needed
+          json: {
+            subtitles
+          }
+        }
       }
 
       console.log('Processed transcription:', {
@@ -305,19 +359,21 @@ export class AssemblyAIProcessor {
       return result
 
     } catch (error) {
-      this.handleError(error)
+      await this.handleError(error)
+      throw error
     }
   }
 
-  private handleError(error: any): never {
-    console.error('AssemblyAI error:', error)
-    let errorMessage = 'Processing failed'
-    if (error instanceof Error) {
-      errorMessage = error.message
-    } else if (error?.response?.data?.error) {
-      errorMessage = error.response.data.error
-    }
-    throw new Error(errorMessage)
+  async processAudioWithQueue(
+    audioUrl: string,
+    options: {
+      speakerDetection?: boolean
+      wordTimestamps?: boolean
+      speakerNames?: string[]
+    } = {},
+    onProgress?: (progress: number) => void
+  ): Promise<TranscriptionResult> {
+    return audioQueue.enqueue(audioUrl, options, onProgress)
   }
 }
 
