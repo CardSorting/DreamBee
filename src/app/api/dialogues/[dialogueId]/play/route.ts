@@ -6,7 +6,7 @@ export async function POST(
   { params }: { params: { dialogueId: string } }
 ) {
   try {
-    const { dialogueId } = params
+    const { dialogueId } = await params
     await incrementPlayCount(dialogueId)
     const stats = await getPlayStats(dialogueId)
     

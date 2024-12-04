@@ -19,27 +19,26 @@ export async function GET(request: NextRequest) {
     if (!genre || genre === 'All') {
       // Use Scan for all dialogues
       const scanParams = {
-        TableName: 'PublishedDialogues',
-        FilterExpression: 'begins_with(pk, :prefix)',
+        TableName: 'UserDialogues',
+        IndexName: 'GSI1',
+        FilterExpression: 'begins_with(gsi1sk, :prefix)',
         ExpressionAttributeValues: {
-          ':prefix': 'GENRE#'
+          ':prefix': 'PUBLISHED#'
         },
         Limit: 50
       }
       const command = new ScanCommand(scanParams)
       result = await docClient.send(command)
     } else {
-      // Use Query with partition key for specific genre
+      // Query specific genre
       const queryParams = {
-        TableName: 'PublishedDialogues',
-        KeyConditionExpression: '#pk = :pk',
-        ExpressionAttributeNames: {
-          '#pk': 'pk'
-        },
+        TableName: 'UserDialogues',
+        IndexName: 'GSI1',
+        KeyConditionExpression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
         ExpressionAttributeValues: {
-          ':pk': `GENRE#${genre}`
+          ':pk': `USER#${userId}`,
+          ':sk': 'PUBLISHED#'
         },
-        ScanIndexForward: false,
         Limit: 50
       }
       const command = new QueryCommand(queryParams)
@@ -49,28 +48,34 @@ export async function GET(request: NextRequest) {
     // Get unique user IDs from the dialogues
     const userIds = Array.from(new Set(result.Items?.map(item => item.userId) || []))
     
-    // Batch get user profiles
-    const userProfiles = await docClient.send(new BatchGetCommand({
-      RequestItems: {
-        'UserProfiles': {
-          Keys: userIds.map(id => ({
-            pk: `USER#${id}`,
-            sk: `PROFILE#${id}`
-          }))
-        }
-      }
-    }))
+    // Initialize userProfileMap
+    let userProfileMap: Record<string, any> = {}
 
-    // Create a map of user profiles for easy lookup
-    const userProfileMap = (userProfiles.Responses?.UserProfiles || []).reduce((acc, profile) => {
-      const userId = profile.userId
-      acc[userId] = {
-        username: profile.username || 'User',
-        avatarUrl: profile.avatarUrl || null,
-        bio: profile.bio || '',
-      }
-      return acc
-    }, {} as Record<string, any>)
+    // Only perform batch get if there are userIds
+    if (userIds.length > 0) {
+      // Batch get user profiles
+      const userProfiles = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          'UserProfiles': {
+            Keys: userIds.map(id => ({
+              pk: `USER#${id}`,
+              sk: `PROFILE#${id}`
+            }))
+          }
+        }
+      }))
+
+      // Create a map of user profiles for easy lookup
+      userProfileMap = (userProfiles.Responses?.UserProfiles || []).reduce((acc, profile) => {
+        const userId = profile.userId
+        acc[userId] = {
+          username: profile.username || 'User',
+          avatarUrl: profile.avatarUrl || null,
+          bio: profile.bio || '',
+        }
+        return acc
+      }, {} as Record<string, any>)
+    }
 
     // Add user profile information to each dialogue
     const dialogues = result.Items?.map(item => ({

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, memo } from 'react'
-import { getAudioMerger, AudioSegmentInfo } from '../../../utils/audio-merger'
+import { getWebAudioMerger } from '../../../utils/web-audio-merger'
 import { getAudioProcessor } from '../../../utils/assemblyai'
 import { TimeFormatter } from './utils/TimeFormatter'
 import { AudioPreviewProps, Subtitle } from './utils/types'
@@ -168,110 +168,57 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
     }
   }, [updateSubtitles])
 
-  useEffect(() => {
-    const processAudioAndSubtitles = async () => {
-      if (processingRef.current) return
-      processingRef.current = true
+  const processAudioAndSubtitles = useCallback(async () => {
+    if (processingRef.current || !result?.audioUrls) return
+    processingRef.current = true
 
-      try {
-        setStatus('Processing audio')
-        const segments: AudioSegmentInfo[] = result.audioUrls.map(audio => ({
-          url: audio.directUrl,
-          startTime: 0,
-          endTime: 0,
-          character: audio.character
-        }))
+    try {
+      setStatus('Processing audio')
+      const audioMerger = getWebAudioMerger((progress) => {
+        setStatus(`${progress.stage === 'loading' ? 'Loading' : 'Processing'} audio`)
+        setProgress(progress.progress)
+      })
 
-        const audioMerger = getAudioMerger(mergerProgress => {
-          setProgress(Math.floor(Number(mergerProgress.progress) / 2))
-        })
+      // Convert audioUrls to segments
+      const segments = result.audioUrls.map((audio, index, array) => ({
+        url: audio.directUrl,
+        startTime: index * 2, // Add 2 seconds gap between segments
+        endTime: (index + 1) * 2,
+        character: audio.character,
+        previousCharacter: index > 0 ? array[index - 1].character : undefined
+      }))
 
-        const audioBlob = await audioMerger.mergeAudioSegments(segments, 'preview')
-        const url = URL.createObjectURL(audioBlob)
-        setAudioUrl(url)
+      const audioBlob = await audioMerger.mergeAudioSegments(segments)
+      const url = URL.createObjectURL(audioBlob)
+      setAudioUrl(url)
+      setStatus('Ready')
+      setProgress(100)
 
-        // Check if we already have AssemblyAI result
-        if (result.assemblyAiResult?.subtitles?.length) {
-          console.log('Using stored AssemblyAI result:', {
-            subtitleCount: result.assemblyAiResult.subtitles.length,
-            speakers: result.assemblyAiResult.speakers
-          })
-          // Sort subtitles by start time and add unique IDs
-          const processedSubtitles: Subtitle[] = [...result.assemblyAiResult.subtitles]
-            .sort((a, b) => a.start - b.start)
-            .map((sub: AssemblyAISubtitle, index) => ({
-              ...sub,
-              id: `subtitle_${index}_${Date.now()}`
-            }))
-          sortedSubtitlesRef.current = processedSubtitles
-          setTranscriptionResult(result.assemblyAiResult)
-          // Initialize with first subtitle
-          if (processedSubtitles.length > 0) {
-            const firstSubtitle = processedSubtitles[0]
-            setCurrentSubtitle(firstSubtitle)
-            lastSubtitleRef.current = firstSubtitle
-            // Preload initial subtitles
-            preloadedSubtitlesRef.current = preloadSubtitles(0)
-          }
-          setProgress(100)
-          setStatus('Ready')
-        } else {
-          // If no stored result, process with AssemblyAI
-          console.log('No stored AssemblyAI result, processing audio')
-          const characterNames = segments.map(segment => segment.character)
+      // Process transcription result if available
+      if (result.assemblyAiResult) {
+        const processedSubtitles: Subtitle[] = result.assemblyAiResult.subtitles
+          .sort((a, b) => a.start - b.start)
+          .map((sub, index) => ({
+            ...sub,
+            id: `subtitle_${index}_${Date.now()}`
+          }))
+        
+        sortedSubtitlesRef.current = processedSubtitles
+        setTranscriptionResult(result.assemblyAiResult)
 
-          setStatus('Generating subtitles')
-          const assemblyAI = getAudioProcessor()
-          const transcription = await assemblyAI.generateSubtitles(
-            url,
-            { 
-              speakerDetection: true,
-              wordTimestamps: true,
-              speakerNames: characterNames
-            },
-            subtitleProgress => {
-              setProgress(50 + Math.floor(subtitleProgress / 2))
-            }
-          )
-
-          console.log('Received transcription:', {
-            textLength: transcription.text?.length,
-            subtitleCount: transcription.subtitles?.length,
-            speakers: transcription.speakers
-          })
-
-          // Sort subtitles by start time and add unique IDs
-          const processedSubtitles: Subtitle[] = [...transcription.subtitles]
-            .sort((a, b) => a.start - b.start)
-            .map((sub: AssemblyAISubtitle, index) => ({
-              ...sub,
-              id: `subtitle_${index}_${Date.now()}`
-            }))
-          sortedSubtitlesRef.current = processedSubtitles
-          setTranscriptionResult(transcription)
-          // Initialize with first subtitle
-          if (processedSubtitles.length > 0) {
-            const firstSubtitle = processedSubtitles[0]
-            setCurrentSubtitle(firstSubtitle)
-            lastSubtitleRef.current = firstSubtitle
-            // Preload initial subtitles
-            preloadedSubtitlesRef.current = preloadSubtitles(0)
-          }
-          setStatus('Ready')
+        // Initialize with first subtitle
+        if (processedSubtitles.length > 0) {
+          const firstSubtitle = processedSubtitles[0]
+          setCurrentSubtitle(firstSubtitle)
+          lastSubtitleRef.current = firstSubtitle
+          // Preload initial subtitles
+          preloadedSubtitlesRef.current = preloadSubtitles(0)
         }
-      } catch (error) {
-        handleError(error instanceof Error ? error : new Error('Unknown error'))
-      } finally {
-        processingRef.current = false
       }
-    }
-
-    processAudioAndSubtitles()
-
-    return () => {
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl)
-      }
+    } catch (error) {
+      handleError(error instanceof Error ? error : new Error('Unknown error occurred'))
+    } finally {
+      processingRef.current = false
     }
   }, [result, handleError, preloadSubtitles])
 
@@ -309,6 +256,16 @@ export function AudioPreview({ result, onError }: AudioPreviewProps) {
       lastSubtitleRef.current = lastSubtitle
     }
   }, [])
+
+  useEffect(() => {
+    processAudioAndSubtitles()
+
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl)
+      }
+    }
+  }, [processAudioAndSubtitles])
 
   if (!audioUrl || !transcriptionResult) {
     return <LoadingState status={status} progress={progress} />

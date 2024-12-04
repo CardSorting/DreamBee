@@ -4,6 +4,9 @@ export interface AudioSegmentInfo {
   endTime: number
   character: string
   previousCharacter?: string
+  volume?: number
+  pitch?: number
+  rate?: number
 }
 
 interface MergeProgress {

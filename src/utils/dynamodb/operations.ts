@@ -53,13 +53,11 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<Pu
     updatedAt: publishedAt
   }
 
-  // Create the published dialogue item
+  // Create the published dialogue entry
   const publishedDialogue: PublishedDialogue = {
     type: 'PUBLISHED_DIALOGUE',
-    pk: `PUBLISHED#${params.genre}`,
+    pk: `GENRE#${params.genre}`,
     sk: `DIALOGUE#${timestamp}#${params.dialogueId}`,
-    gsi1pk: `USER#${params.userId}`,
-    gsi1sk: `PUBLISHED#${timestamp}`,
     userId: params.userId,
     dialogueId: params.dialogueId,
     title: params.title,
@@ -69,16 +67,14 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<Pu
     audioUrl: params.audioUrl,
     metadata: params.metadata,
     transcript: params.transcript,
+    publishedAt,
+    sortKey: `DIALOGUE#${timestamp}#${params.dialogueId}`,
     stats: {
       likes: 0,
       dislikes: 0,
-      comments: 0
-    },
-    isPublished: true,
-    publishedAt,
-    createdAt: publishedAt,
-    updatedAt: publishedAt,
-    sortKey: `DIALOGUE#${timestamp}#${params.dialogueId}`
+      comments: 0,
+      plays: 0
+    }
   }
 
   // Use a transaction to create both items

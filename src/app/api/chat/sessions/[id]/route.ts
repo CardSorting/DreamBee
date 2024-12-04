@@ -15,8 +15,8 @@ export async function GET(
       )
     }
 
-    const sessionId = await params.id
-    const conversation = await getConversation(userId, sessionId)
+    const { id } = await params
+    const conversation = await getConversation(userId, id)
 
     if (!conversation) {
       return NextResponse.json(
@@ -56,9 +56,9 @@ export async function DELETE(
       )
     }
 
-    const sessionId = await params.id
-    await deleteConversation(userId, sessionId)
-    return NextResponse.json({ success: true })
+    const { id } = await params
+    const success = await deleteConversation(userId, id)
+    return NextResponse.json({ success })
   } catch (error) {
     console.error('Error deleting session:', error)
     return NextResponse.json(
@@ -81,7 +81,7 @@ export async function PATCH(
       )
     }
 
-    const sessionId = await params.id
+    const { id } = await params
     const { title } = await request.json()
 
     if (!title) {
@@ -93,7 +93,7 @@ export async function PATCH(
 
     const conversation = await updateConversation({
       userId,
-      conversationId: sessionId,
+      conversationId: id,
       title
     })
 
