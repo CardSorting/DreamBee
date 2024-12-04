@@ -15,12 +15,12 @@ export async function GET(
 
     const { dialogueId } = params
 
-    // Get user's reaction
+    // Get user's reaction using the correct key schema
     const reaction = await docClient.send(new GetCommand({
       TableName: 'UserReactions',
       Key: {
-        userId,
-        dialogueId
+        pk: `USER#${userId}`,
+        sk: `DIALOGUE#${dialogueId}`
       }
     }))
 

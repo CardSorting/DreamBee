@@ -1,15 +1,17 @@
 export const DIALOGUE_GENRES = [
-  'comedy',
-  'drama',
-  'action',
-  'romance',
-  'mystery',
-  'horror',
-  'fantasy',
-  'sci-fi',
-  'slice-of-life',
-  'educational',
-  'other'
+  'Comedy',
+  'Drama',
+  'Action',
+  'Romance',
+  'Mystery',
+  'Horror',
+  'Fantasy',
+  'Sci-Fi',
+  'Slice of Life',
+  'Educational',
+  'Business',
+  'Technology',
+  'Other'
 ] as const
 
 export type DialogueGenre = typeof DIALOGUE_GENRES[number]

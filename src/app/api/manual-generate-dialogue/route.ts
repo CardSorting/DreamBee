@@ -118,25 +118,54 @@ export async function POST(req: NextRequest) {
         } as ChunkMetadata
       })
 
-      // Invalidate cache for this dialogue's sessions
-      await redisService.invalidateDialogueSessions(userId, dialogueId)
-
-      // Process first chunk immediately, queue others for background processing
-      const firstChunk = chunks[0]
-      const result = await processDialogueChunk(
-        userId,
-        dialogueId,
-        firstChunk.chunkIndex,
-        firstChunk
+      // Process all chunks in parallel
+      const chunkResults = await Promise.all(
+        chunks.map(chunk => 
+          processDialogueChunk(
+            userId,
+            dialogueId,
+            chunk.chunkIndex,
+            chunk
+          )
+        )
       )
 
-      return NextResponse.json({
+      // Combine results from all chunks
+      const combinedResult = {
         dialogueId,
         title: body.title,
         isChunked: true,
         totalChunks: chunks.length,
-        firstChunkResult: result
-      })
+        audioUrls: chunkResults.flatMap(result => result.audioUrls),
+        metadata: {
+          totalDuration: chunkResults.reduce((total, result) => total + result.metadata.totalDuration, 0),
+          speakers: body.characters.map(c => c.customName),
+          turnCount: body.dialogue.length,
+          completedChunks: chunks.length,
+          totalChunks: chunks.length
+        },
+        transcript: {
+          srt: chunkResults.map(result => result.transcript.srt).join('\n\n'),
+          vtt: chunkResults.map(result => result.transcript.vtt).join('\n\n'),
+          json: {
+            text: chunkResults.map(result => result.transcript.json.text).join(' '),
+            subtitles: chunkResults.flatMap(result => result.transcript.json.subtitles),
+            speakers: body.characters.map(c => c.customName),
+            confidence: chunkResults.reduce((sum, result) => sum + result.transcript.json.confidence, 0) / chunks.length
+          }
+        },
+        assemblyAiResult: {
+          text: chunkResults.map(result => result.assemblyAiResult.text).join(' '),
+          subtitles: chunkResults.flatMap(result => result.assemblyAiResult.subtitles),
+          speakers: body.characters.map(c => c.customName),
+          confidence: chunkResults.reduce((sum, result) => sum + result.assemblyAiResult.confidence, 0) / chunks.length
+        }
+      }
+
+      // Invalidate cache for this dialogue's sessions
+      await redisService.invalidateDialogueSessions(userId, dialogueId)
+
+      return NextResponse.json(combinedResult)
     }
 
     // Process single chunk dialogue

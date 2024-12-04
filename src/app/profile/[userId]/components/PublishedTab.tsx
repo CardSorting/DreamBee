@@ -31,7 +31,9 @@ export function PublishedTab({ userId }: PublishedTabProps) {
       }
       setError(null)
       
+      console.log('Fetching dialogues for user:', userId, 'page:', pageNum, 'cursor:', cursor)
       const response = await fetchPublishedDialogues(userId, pageNum, ITEMS_PER_PAGE, cursor)
+      console.log('Fetch response:', response)
       
       if (append) {
         setDialogues(prev => [...prev, ...response.dialogues])
@@ -42,7 +44,11 @@ export function PublishedTab({ userId }: PublishedTabProps) {
       setHasMore(response.pagination.hasMore)
       setCursor(response.pagination.nextCursor || null)
     } catch (error) {
-      console.error('Error fetching published dialogues:', error)
+      console.error('Error fetching published dialogues:', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      })
       setError('Failed to load published dialogues')
     } finally {
       setIsLoading(false)

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { CharacterVoice, PREDEFINED_VOICES } from '../../utils/voice-config'
-import { DialogueGenre } from '../../utils/dynamodb/types/published-dialogue'
+import { DialogueGenre } from '../../utils/dynamodb/types'
 import { DialogueSession } from '../../utils/dynamodb/types'
 import { MetadataEditor } from './dialogue/MetadataEditor'
 import { CharacterManager } from './dialogue/CharacterManager'
@@ -77,7 +77,15 @@ export default function ManualDialogueCreator({
       }
 
       const data = await response.json()
-      setResult(data)
+      
+      // Handle chunked dialogue results
+      if (data.isChunked) {
+        // The data already contains combined results from all chunks
+        setResult(data)
+      } else {
+        // Single chunk result
+        setResult(data)
+      }
       
       if (onGenerationComplete) {
         onGenerationComplete(data)
@@ -110,7 +118,10 @@ export default function ManualDialogueCreator({
       setIsPublishing(true)
       setError(null)
 
-      const response = await fetch('/api/feed', {
+      // First, create a unique dialogueId if not provided
+      const dialogueId = crypto.randomUUID()
+
+      const response = await fetch(`/api/dialogues/${dialogueId}/publish`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -118,10 +129,14 @@ export default function ManualDialogueCreator({
         body: JSON.stringify({
           title,
           genre,
+          description: `A dialogue between ${characters.map(c => c.customName).join(' and ')}`,
+          hashtags: [],
           audioUrl: result.audioUrls[0]?.url,
-          dialogue,
           metadata: {
-            ...result.metadata,
+            totalDuration: result.metadata.totalDuration,
+            speakers: characters.map(c => c.customName),
+            turnCount: dialogue.length,
+            createdAt: Date.now(),
             audioUrls: result.audioUrls,
             transcript: result.transcript
           }
@@ -129,11 +144,12 @@ export default function ManualDialogueCreator({
       })
 
       if (!response.ok) {
-        throw new Error('Failed to publish dialogue')
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to publish dialogue')
       }
 
-      // Redirect to feed page after successful publish
-      window.location.href = '/dashboard/feed'
+      // Redirect to the profile page after successful publish
+      window.location.href = '/dashboard'
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to publish dialogue')
     } finally {

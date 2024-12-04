@@ -4,7 +4,7 @@ import { getConversation, updateConversation, deleteConversation } from '../../.
 
 export async function GET(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
     const { userId } = getAuth(request)
@@ -15,7 +15,7 @@ export async function GET(
       )
     }
 
-    const sessionId = context.params.id
+    const sessionId = await params.id
     const conversation = await getConversation(userId, sessionId)
 
     if (!conversation) {
@@ -45,7 +45,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
     const { userId } = getAuth(request)
@@ -56,7 +56,7 @@ export async function DELETE(
       )
     }
 
-    const sessionId = context.params.id
+    const sessionId = await params.id
     await deleteConversation(userId, sessionId)
     return NextResponse.json({ success: true })
   } catch (error) {
@@ -70,7 +70,7 @@ export async function DELETE(
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
     const { userId } = getAuth(request)
@@ -81,7 +81,7 @@ export async function PATCH(
       )
     }
 
-    const sessionId = context.params.id
+    const sessionId = await params.id
     const { title } = await request.json()
 
     if (!title) {

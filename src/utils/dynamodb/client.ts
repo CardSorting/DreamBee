@@ -60,6 +60,22 @@ const { docClient, rawClient } = (() => {
     console.log('[DynamoDB] Initializing client...')
     const credentials = validateAWSCredentials()
     
+    const rawDynamoDBClient = new DynamoDBClient({
+      region: credentials.region,
+      credentials: {
+        accessKeyId: credentials.accessKeyId,
+        secretAccessKey: credentials.secretAccessKey
+      },
+      maxAttempts: 3,
+      retryMode: 'standard',
+      logger: {
+        debug: (...args) => console.debug('[DynamoDB]', ...args),
+        info: (...args) => console.info('[DynamoDB]', ...args),
+        warn: (...args) => console.warn('[DynamoDB]', ...args),
+        error: (...args) => console.error('[DynamoDB]', ...args)
+      }
+    })
+
     const client = new DynamoDBClient({
       region: credentials.region,
       credentials: {
@@ -88,7 +104,7 @@ const { docClient, rawClient } = (() => {
     })
 
     console.log('[DynamoDB] Client initialized successfully')
-    return { docClient: documentClient, rawClient: client }
+    return { docClient: documentClient, rawClient: rawDynamoDBClient }
   } catch (error) {
     console.error('[DynamoDB] Error initializing client:', error)
     throw error

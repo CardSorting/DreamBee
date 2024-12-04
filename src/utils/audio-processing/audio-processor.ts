@@ -48,45 +48,61 @@ import os
 import sys
 import urllib.request
 import io
+from pydub import AudioSegment
+import tempfile
+
+def download_segment(url, temp_dir):
+    try:
+        response = urllib.request.urlopen(url)
+        temp_path = os.path.join(temp_dir, 'temp.mp3')
+        with open(temp_path, 'wb') as f:
+            f.write(response.read())
+        return AudioSegment.from_mp3(temp_path)
+    except Exception as e:
+        print(f'Error downloading segment: {str(e)}', file=sys.stderr)
+        raise
 
 def main():
     try:
-        # Get segments and temp dir from arguments
         segments = ${JSON.stringify(segments)}
         temp_dir = '${tempDir.replace(/\\/g, '\\\\')}'
+        output_path = os.path.join(temp_dir, 'output.mp3')
         
         print('Starting audio processing', file=sys.stderr)
         
-        # Create output file path
-        output_path = os.path.join(temp_dir, 'output.mp3')
-        
-        # Process each segment
-        all_audio_data = []
+        # Initialize final audio
+        final_audio = AudioSegment.silent(duration=0)
         current_position = 0
 
         for i, segment in enumerate(segments):
             print(f'Processing segment {i + 1}/{len(segments)}', file=sys.stderr)
             
-            # Calculate silence needed before this segment
+            # Calculate timing
             start_time_ms = int(float(segment['startTime']) * 1000)
             silence_needed = start_time_ms - current_position
             
+            # Add silence if needed
             if silence_needed > 0:
                 print(f'Adding {silence_needed}ms of silence', file=sys.stderr)
-                # For now, we'll skip adding silence since we're just concatenating
+                final_audio += AudioSegment.silent(duration=silence_needed)
                 current_position += silence_needed
+            
+            # Add small pause between different speakers
+            if segment.get('previousCharacter') and segment['previousCharacter'] != segment['character']:
+                pause_duration = 300  # 300ms pause between speakers
+                final_audio += AudioSegment.silent(duration=pause_duration)
+                current_position += pause_duration
             
             # Download and process segment
             try:
-                response = urllib.request.urlopen(segment['url'])
-                audio_data = response.read()
-                print(f'Downloaded {len(audio_data)} bytes', file=sys.stderr)
+                audio_segment = download_segment(segment['url'], temp_dir)
+                print(f'Downloaded audio segment of length {len(audio_segment)}ms', file=sys.stderr)
                 
-                # Add audio data to list
-                all_audio_data.append(audio_data)
+                # Add audio segment
+                final_audio += audio_segment
                 
-                # Update current position
-                segment_duration = int(float(segment['endTime'] - segment['startTime']) * 1000)
+                # Update position
+                segment_duration = len(audio_segment)
                 current_position += segment_duration
                 
                 print(f'Added segment, current position: {current_position}ms', file=sys.stderr)
@@ -100,12 +116,8 @@ def main():
             print(f'progress:{progress}')
             sys.stdout.flush()
         
-        # Concatenate all audio data
-        final_audio = b''.join(all_audio_data)
-        
-        # Write to output file
-        with open(output_path, 'wb') as f:
-            f.write(final_audio)
+        # Export final audio
+        final_audio.export(output_path, format='mp3')
         
         # Read and output the final file
         if os.path.exists(output_path):

@@ -11,7 +11,9 @@
     "test-s3": "node scripts/test-s3.js",
     "configure-bucket": "node scripts/configure-bucket.js",
     "test-dialogue": "node scripts/test-dialogue.js",
-    "setup-mediaconvert": "node scripts/setup-mediaconvert.js"
+    "setup-mediaconvert": "node scripts/setup-mediaconvert.js",
+    "create-table": "node scripts/create-dynamodb-table.js",
+    "delete-table": "node scripts/delete-dynamodb-table.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -52,7 +54,7 @@
   },
   "devDependencies": {
     "@types/json5": "^0.0.30",
-    "@types/node": "^20",
+    "@types/node": "^20.17.9",
     "@types/node-fetch": "^2.6.4",
     "@types/react": "^18",
     "@types/react-dom": "^18",
@@ -64,6 +66,7 @@
     "style-loader": "^4.0.0",
     "tailwind-scrollbar": "^3.1.0",
     "tailwindcss": "^3.4.15",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

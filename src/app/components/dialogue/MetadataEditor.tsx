@@ -1,6 +1,6 @@
 'use client'
 
-import { DIALOGUE_GENRES, DialogueGenre } from '@/utils/dynamodb/types/published-dialogue'
+import { DIALOGUE_GENRES, DialogueGenre } from '@/utils/dynamodb/types'
 
 interface MetadataEditorProps {
   title: string
