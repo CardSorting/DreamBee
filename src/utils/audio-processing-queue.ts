@@ -19,7 +19,11 @@ class AudioProcessingQueue {
   private queue: QueueItem[] = []
   private isProcessing = false
   private readonly maxRetries = 3
-  private readonly minRetryDelay = 60 * 60 * 1000 // 1 hour in milliseconds
+  private readonly baseRetryDelay = 5 * 60 * 1000 // 5 minutes base delay
+  private readonly maxConcurrent = 2 // Maximum concurrent requests
+  private activeRequests = 0
+  private lastRequestTime = 0
+  private readonly minRequestInterval = 10000 // 10 seconds between requests
 
   private constructor() {}
 
@@ -56,7 +60,7 @@ class AudioProcessingQueue {
   }
 
   private async processQueue() {
-    if (this.isProcessing || this.queue.length === 0) {
+    if (this.isProcessing || this.queue.length === 0 || this.activeRequests >= this.maxConcurrent) {
       return
     }
 
@@ -64,7 +68,16 @@ class AudioProcessingQueue {
     const item = this.queue[0]
 
     try {
+      // Check if we need to wait before making another request
+      const timeSinceLastRequest = Date.now() - this.lastRequestTime
+      if (timeSinceLastRequest < this.minRequestInterval) {
+        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest))
+      }
+
       console.log(`[Queue] Processing item ${item.id}`)
+      this.activeRequests++
+      this.lastRequestTime = Date.now()
+      
       const processor = getAudioProcessor()
       const result = await processor.generateSubtitles(
         item.audioUrl,
@@ -84,11 +97,15 @@ class AudioProcessingQueue {
         item.retryCount++
         this.queue.shift()
         this.queue.push(item)
-        console.log(`[Queue] Rate limit hit for item ${item.id}. Moved to end of queue. Retry ${item.retryCount}/${this.maxRetries}`)
         
-        // Wait before processing next item
-        const delay = this.minRetryDelay
-        console.log(`[Queue] Waiting ${delay/1000/60} minutes before processing next item`)
+        // Calculate exponential backoff delay
+        const backoffDelay = this.baseRetryDelay * Math.pow(2, item.retryCount - 1)
+        const jitter = Math.random() * 30000 // Add up to 30 seconds of random jitter
+        const delay = backoffDelay + jitter
+        
+        console.log(`[Queue] Rate limit hit for item ${item.id}. Moved to end of queue. Retry ${item.retryCount}/${this.maxRetries}`)
+        console.log(`[Queue] Waiting ${Math.round(delay/1000/60)} minutes before next attempt`)
+        
         await new Promise(resolve => setTimeout(resolve, delay))
       } else if (error.message?.includes('rate limit')) {
         // Max retries exceeded - remove from queue and reject
@@ -99,13 +116,15 @@ class AudioProcessingQueue {
         this.queue.shift()
         item.reject(error)
       }
-    }
-
-    this.isProcessing = false
-    
-    // Process next item if queue not empty
-    if (this.queue.length > 0) {
-      this.processQueue()
+    } finally {
+      this.activeRequests--
+      this.isProcessing = false
+      
+      // Process next item if queue not empty and under concurrent limit
+      if (this.queue.length > 0 && this.activeRequests < this.maxConcurrent) {
+        // Add a small delay between processing items
+        setTimeout(() => this.processQueue(), 1000)
+      }
     }
   }
 

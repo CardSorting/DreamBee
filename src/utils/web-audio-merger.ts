@@ -47,19 +47,25 @@ export class WebAudioMerger {
       // Download all audio segments
       const buffers = await this.downloadSegments(segments)
       
-      // Calculate total duration and create output buffer
-      let totalDuration = Math.max(...segments.map(s => s.endTime))
+      // Use AssemblyAI's timing for total duration
+      const totalDuration = Math.max(...segments.map(s => s.endTime)) + 0.1 // Small padding
       const outputBuffer = this.audioContext.createBuffer(
         2, // Number of channels (stereo)
-        this.audioContext.sampleRate * totalDuration,
+        Math.ceil(this.audioContext.sampleRate * totalDuration),
         this.audioContext.sampleRate
       )
+
+      // Clear the output buffer
+      for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+        const outputData = outputBuffer.getChannelData(channel)
+        outputData.fill(0)
+      }
       
-      // Process each segment
+      // Process each segment using AssemblyAI's timing
       for (let i = 0; i < segments.length; i++) {
         this.onProgress?.({
           stage: 'processing',
-          progress: 50 + (i / segments.length) * 50, // Last 50% is processing
+          progress: 50 + (i / segments.length) * 50,
           segmentIndex: i,
           totalSegments: segments.length
         })
@@ -67,31 +73,35 @@ export class WebAudioMerger {
         const segment = segments[i]
         const buffer = buffers[i]
         
-        // Calculate start position in samples
+        // Use AssemblyAI's timing directly
         const startSample = Math.floor(segment.startTime * this.audioContext.sampleRate)
         
         // Copy audio data to output buffer
-        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        for (let channel = 0; channel < Math.min(buffer.numberOfChannels, outputBuffer.numberOfChannels); channel++) {
           const inputData = buffer.getChannelData(channel)
           const outputData = outputBuffer.getChannelData(channel)
           
-          // Add small fade in/out to prevent clicks
-          const fadeLength = 100 // samples
-          
-          for (let j = 0; j < buffer.length; j++) {
-            // Apply fade in
-            let gain = 1
-            if (j < fadeLength) {
-              gain = j / fadeLength
-            }
-            // Apply fade out
-            else if (j > buffer.length - fadeLength) {
-              gain = (buffer.length - j) / fadeLength
-            }
-            
-            if (startSample + j < outputData.length) {
-              outputData[startSample + j] = inputData[j] * gain
-            }
+          for (let j = 0; j < buffer.length && startSample + j < outputData.length; j++) {
+            outputData[startSample + j] = inputData[j]
+          }
+        }
+      }
+      
+      // Normalize to prevent clipping
+      let maxAmplitude = 0
+      for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+        const outputData = outputBuffer.getChannelData(channel)
+        for (let i = 0; i < outputData.length; i++) {
+          maxAmplitude = Math.max(maxAmplitude, Math.abs(outputData[i]))
+        }
+      }
+      
+      if (maxAmplitude > 1) {
+        const gain = 0.95 / maxAmplitude // Leave some headroom
+        for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+          const outputData = outputBuffer.getChannelData(channel)
+          for (let i = 0; i < outputData.length; i++) {
+            outputData[i] *= gain
           }
         }
       }
