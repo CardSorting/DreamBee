@@ -7,20 +7,20 @@ interface DialogueCardProps {
 }
 
 export function DialogueCard({ dialogue }: DialogueCardProps) {
-  // Format the data for AudioPreview
+  // Format the data for AudioPreview using existing S3 and DynamoDB data
   const audioPreviewData: GenerationResult = {
     title: dialogue.title,
+    // Use the stored audio URL directly
     audioUrls: [{
       directUrl: dialogue.audioUrl,
       url: dialogue.audioUrl,
       character: dialogue.metadata?.speakers?.[0] || 'Speaker'
     }],
-    metadata: {
-      totalDuration: dialogue.metadata?.totalDuration || 0,
-      speakers: dialogue.metadata?.speakers || [],
-      turnCount: dialogue.metadata?.turnCount || 0
-    },
+    // Use the stored metadata
+    metadata: dialogue.metadata,
+    // Use the stored transcript files
     transcript: dialogue.transcript,
+    // Use the stored AssemblyAI result
     assemblyAiResult: dialogue.transcript?.json
   }
 
@@ -39,9 +39,10 @@ export function DialogueCard({ dialogue }: DialogueCardProps) {
         ))}
       </div>
       <div className="mt-4">
-        <AudioPreview 
-          result={audioPreviewData}
-          onError={(error) => console.error('Audio preview error:', error)}
+        <audio 
+          controls 
+          src={dialogue.audioUrl}
+          className="w-full"
         />
       </div>
       <div className="flex gap-4 mt-4 text-sm text-gray-500">

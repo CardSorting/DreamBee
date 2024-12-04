@@ -19,25 +19,28 @@ export function PublishedTab({ userId }: PublishedTabProps) {
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [cursor, setCursor] = useState<string | null>(null)
 
   const loadDialogues = async (pageNum: number, append = false) => {
     try {
       if (pageNum === 1) {
         setIsLoading(true)
+        setCursor(null)
       } else {
         setLoadingMore(true)
       }
       setError(null)
       
-      const data = await fetchPublishedDialogues(userId, pageNum, ITEMS_PER_PAGE)
+      const response = await fetchPublishedDialogues(userId, pageNum, ITEMS_PER_PAGE, cursor)
       
       if (append) {
-        setDialogues(prev => [...prev, ...data])
+        setDialogues(prev => [...prev, ...response.dialogues])
       } else {
-        setDialogues(data)
+        setDialogues(response.dialogues)
       }
       
-      setHasMore(data.length === ITEMS_PER_PAGE)
+      setHasMore(response.pagination.hasMore)
+      setCursor(response.pagination.nextCursor || null)
     } catch (error) {
       console.error('Error fetching published dialogues:', error)
       setError('Failed to load published dialogues')
@@ -95,7 +98,10 @@ export function PublishedTab({ userId }: PublishedTabProps) {
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {dialogues.map((dialogue) => (
-          <DialogueCard key={dialogue.dialogueId} dialogue={dialogue} />
+          <DialogueCard 
+            key={`${dialogue.dialogueId}_${dialogue.createdAt}`} 
+            dialogue={dialogue} 
+          />
         ))}
       </div>
       
