@@ -39,6 +39,7 @@ export interface UserPublishedDialogue extends BaseItem {
   dialogueId: string
   createdAt: string
   title: string
+  subtitle?: string
   description: string
   genre: string
   hashtags: string[]
@@ -58,6 +59,7 @@ export interface UserPublishedDialogue extends BaseItem {
     likes: number
     dislikes: number
     comments: number
+    plays: number
   }
 }
 

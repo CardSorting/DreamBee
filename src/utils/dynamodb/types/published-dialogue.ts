@@ -1,5 +1,11 @@
 import { BaseItem } from '../types'
 
+export interface UserProfile {
+  username: string
+  avatarUrl: string | null
+  bio: string
+}
+
 export interface PublishedDialogue extends BaseItem {
   type: 'PUBLISHED_DIALOGUE'
   userId: string
@@ -25,6 +31,10 @@ export interface PublishedDialogue extends BaseItem {
     character: string
     text: string
   }[]
+  userProfile?: UserProfile
+  stats?: {
+    plays: number
+  }
 }
 
 export interface Comment {

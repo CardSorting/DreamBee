@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { QueryCommand, ScanCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
+import { QueryCommand, ScanCommand, PutCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb'
 import { getAuth } from '@clerk/nextjs/server'
 import { PublishedDialogue } from '../../../utils/dynamodb/types/published-dialogue'
 import { docClient } from '../../../utils/dynamodb/client'
@@ -46,24 +46,61 @@ export async function GET(request: NextRequest) {
       result = await docClient.send(command)
     }
 
-    // Log the result for debugging
-    console.log('Query/Scan result:', {
-      count: result.Count,
-      items: result.Items?.length,
-      genre: genre || 'All'
+    // Get unique user IDs from the dialogues
+    const userIds = Array.from(new Set(result.Items?.map(item => item.userId) || []))
+    
+    // Batch get user profiles
+    const userProfiles = await docClient.send(new BatchGetCommand({
+      RequestItems: {
+        'UserProfiles': {
+          Keys: userIds.map(id => ({
+            pk: `USER#${id}`,
+            sk: `PROFILE#${id}`
+          }))
+        }
+      }
+    }))
+
+    // Create a map of user profiles for easy lookup
+    const userProfileMap = (userProfiles.Responses?.UserProfiles || []).reduce((acc, profile) => {
+      const userId = profile.userId
+      acc[userId] = {
+        username: profile.username || 'User',
+        avatarUrl: profile.avatarUrl || null,
+        bio: profile.bio || '',
+      }
+      return acc
+    }, {} as Record<string, any>)
+
+    // Add user profile information to each dialogue
+    const dialogues = result.Items?.map(item => ({
+      ...item,
+      userProfile: userProfileMap[item.userId] || {
+        username: 'User',
+        avatarUrl: null,
+        bio: ''
+      }
+    })) || []
+
+    return NextResponse.json({
+      dialogues,
+      pagination: {
+        hasMore: result.LastEvaluatedKey != null,
+        lastKey: result.LastEvaluatedKey
+      }
     })
-
-    // Ensure unique dialogues by dialogueId
-    const uniqueDialogues = result.Items ? 
-      Object.values(result.Items.reduce((acc, item) => {
-        acc[item.dialogueId] = item;
-        return acc;
-      }, {})) : [];
-
-    return NextResponse.json({ dialogues: uniqueDialogues })
   } catch (error) {
-    console.error('Error fetching dialogues:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error in feed API:', error)
+    return new NextResponse(
+      JSON.stringify({ 
+        error: 'Failed to fetch feed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }),
+      { 
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    )
   }
 }
 

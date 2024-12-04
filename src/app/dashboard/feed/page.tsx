@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { PublishedDialogue, DIALOGUE_GENRES, DialogueGenre } from '../../../utils/dynamodb/types/published-dialogue'
+import Link from 'next/link'
 
 interface UserReactions {
   [dialogueId: string]: 'LIKE' | 'DISLIKE' | null;
@@ -16,6 +17,7 @@ export default function FeedPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
+  const [playCount, setPlayCount] = useState<Record<string, number>>({})
 
   useEffect(() => {
     loadDialogues()
@@ -32,6 +34,13 @@ export default function FeedPage() {
       }
       const data = await response.json()
       setDialogues(data.dialogues || [])
+
+      // Initialize play counts
+      const initialPlayCounts: Record<string, number> = {}
+      data.dialogues?.forEach((dialogue: PublishedDialogue) => {
+        initialPlayCounts[dialogue.dialogueId] = dialogue.stats?.plays || 0
+      })
+      setPlayCount(initialPlayCounts)
 
       // Load user reactions for these dialogues
       if (data.dialogues?.length > 0) {
@@ -54,260 +63,209 @@ export default function FeedPage() {
     }
   }
 
-  const handleAction = async (dialogueId: string, action: 'like' | 'dislike') => {
-    if (actionInProgress) return;
-    
+  const handlePlay = async (dialogueId: string) => {
     try {
-      setActionInProgress(dialogueId);
-
-      // Get the current dialogue
-      const dialogue = dialogues.find(d => d.dialogueId === dialogueId)
-      if (!dialogue) return;
-
-      // Optimistically update UI
-      const currentReaction = userReactions[dialogueId]
-      const newReaction = action === 'like' ? 'LIKE' : action === 'dislike' ? 'DISLIKE' : null
-
-      // Handle like/dislike
-      let likeDelta = 0
-      let dislikeDelta = 0
-
-      if (action === 'like') {
-        if (currentReaction === 'LIKE') {
-          likeDelta = -1
-          setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
-        } else {
-          likeDelta = 1
-          if (currentReaction === 'DISLIKE') {
-            dislikeDelta = -1
-          }
-          setUserReactions(prev => ({ ...prev, [dialogueId]: 'LIKE' }))
-        }
-      } else if (action === 'dislike') {
-        if (currentReaction === 'DISLIKE') {
-          dislikeDelta = -1
-          setUserReactions(prev => ({ ...prev, [dialogueId]: null }))
-        } else {
-          dislikeDelta = 1
-          if (currentReaction === 'LIKE') {
-            likeDelta = -1
-          }
-          setUserReactions(prev => ({ ...prev, [dialogueId]: 'DISLIKE' }))
-        }
-      }
-
-      // Update local state
-      setDialogues(prevDialogues => 
-        prevDialogues.map(d => {
-          if (d.dialogueId === dialogueId) {
-            return {
-              ...d,
-              likes: d.likes + likeDelta,
-              dislikes: d.dislikes + dislikeDelta
-            }
-          }
-          return d
-        })
-      )
-
-      // Make API call
-      const response = await fetch(`/api/feed/${dialogueId}/${action}`, {
+      const response = await fetch(`/api/dialogues/${dialogueId}/play`, {
         method: 'POST'
       })
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.error || `Failed to ${action} dialogue`)
+      if (response.ok) {
+        const { plays } = await response.json()
+        setPlayCount(prev => ({
+          ...prev,
+          [dialogueId]: plays
+        }))
       }
-    } catch (err) {
-      console.error(`Error ${action}ing dialogue:`, err)
-      // Revert optimistic update on error
-      await loadDialogues()
-      const errorMessage = err instanceof Error ? err.message : `Failed to ${action} dialogue`
-      setError(errorMessage)
-      setTimeout(() => setError(null), 3000)
-    } finally {
-      setActionInProgress(null)
+    } catch (error) {
+      console.error('Error tracking play:', error)
     }
   }
 
-  const handleComment = async (dialogueId: string, content: string) => {
-    if (!content.trim() || actionInProgress) return;
-    
+  const handleAction = async (dialogueId: string, action: 'like' | 'dislike') => {
+    if (actionInProgress || !user) return
+
+    setActionInProgress(dialogueId)
     try {
-      setActionInProgress(dialogueId);
-      const response = await fetch(`/api/feed/${dialogueId}/comment`, {
+      const response = await fetch(`/api/feed/${dialogueId}/reaction`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ type: action.toUpperCase() })
       })
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.error || 'Failed to add comment')
+        throw new Error('Failed to update reaction')
       }
-      await loadDialogues() // Reload for comments since we need the new comment data
-    } catch (err) {
-      console.error('Error adding comment:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Failed to add comment'
-      setError(errorMessage)
-      setTimeout(() => setError(null), 3000)
+
+      const updatedDialogue = await response.json()
+      
+      // Update the dialogue in the list
+      setDialogues(prevDialogues =>
+        prevDialogues.map(d =>
+          d.dialogueId === dialogueId
+            ? { ...d, likes: updatedDialogue.likes, dislikes: updatedDialogue.dislikes }
+            : d
+        )
+      )
+
+      // Update user reactions
+      setUserReactions(prev => ({
+        ...prev,
+        [dialogueId]: action.toUpperCase() as 'LIKE' | 'DISLIKE'
+      }))
+    } catch (error) {
+      console.error('Error updating reaction:', error)
     } finally {
       setActionInProgress(null)
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Error Toast */}
-        {error && (
-          <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-50">
-            {error}
-          </div>
-        )}
-
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-5xl mx-auto px-4">
         {/* Genre Filter */}
-        <div className="mb-8">
-          <div className="flex gap-2 overflow-x-auto pb-4">
+        <div className="mb-8 flex items-center gap-2 overflow-x-auto pb-4">
+          <button
+            onClick={() => setSelectedGenre('All')}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${
+              selectedGenre === 'All'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            All
+          </button>
+          {DIALOGUE_GENRES.map((genre) => (
             <button
-              onClick={() => setSelectedGenre('All')}
-              className={`px-4 py-2 rounded-full whitespace-nowrap ${
-                selectedGenre === 'All'
+              key={genre}
+              onClick={() => setSelectedGenre(genre)}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${
+                selectedGenre === genre
                   ? 'bg-blue-600 text-white'
                   : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
-              All
+              {genre}
             </button>
-            {DIALOGUE_GENRES.map((genre) => (
-              <button
-                key={`genre-${genre}`}
-                onClick={() => setSelectedGenre(genre)}
-                className={`px-4 py-2 rounded-full whitespace-nowrap ${
-                  selectedGenre === genre
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                {genre}
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
 
-        {/* Dialogues Feed */}
         {isLoading ? (
-          <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="flex justify-center items-center min-h-[400px]">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
         ) : error ? (
           <div className="text-center py-12">
-            <p className="text-red-600">{error}</p>
+            <div className="text-red-600 mb-4">{error}</div>
             <button
               onClick={loadDialogues}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
-              Retry
+              Try Again
             </button>
           </div>
-        ) : !dialogues || dialogues.length === 0 ? (
+        ) : dialogues.length === 0 ? (
           <div className="text-center py-12">
-            <h3 className="text-lg font-medium text-gray-900">No dialogues found</h3>
-            <p className="mt-2 text-gray-500">Be the first to publish a dialogue!</p>
+            <div className="text-gray-400 text-6xl mb-4">🎭</div>
+            <h3 className="text-xl font-medium text-gray-900 mb-2">No dialogues found</h3>
+            <p className="text-gray-500">Try selecting a different genre or check back later!</p>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {dialogues.map((dialogue) => (
-              <div key={`${dialogue.pk}-${dialogue.sk}`} className="bg-white rounded-lg shadow p-6">
-                <div className="mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">{dialogue.title}</h2>
-                  <p className="mt-1 text-gray-600">{dialogue.description}</p>
-                  <div className="mt-2 flex gap-2">
-                    <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
-                      {dialogue.genre}
-                    </span>
-                    {dialogue.hashtags?.map((tag) => (
-                      <span key={`${dialogue.dialogueId}-${tag}`} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
-                        #{tag}
-                      </span>
-                    ))}
+              <div key={dialogue.dialogueId} className="bg-white rounded-lg shadow p-4">
+                {/* User Info */}
+                {dialogue.userProfile && (
+                  <div className="flex items-center gap-3 mb-4">
+                    <Link href={`/profile/${dialogue.userId}`}>
+                      <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+                        {dialogue.userProfile.avatarUrl ? (
+                          <img 
+                            src={dialogue.userProfile.avatarUrl} 
+                            alt={dialogue.userProfile.username} 
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-lg text-gray-500">
+                            {dialogue.userProfile.username.charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                    </Link>
+                    <div>
+                      <Link 
+                        href={`/profile/${dialogue.userId}`}
+                        className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors"
+                      >
+                        {dialogue.userProfile.username}
+                      </Link>
+                      <div className="text-xs text-gray-500">
+                        {new Date(dialogue.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
                   </div>
+                )}
+
+                {/* Dialogue Content */}
+                <h3 className="text-lg font-semibold mb-2">{dialogue.title}</h3>
+                <p className="text-gray-600 mb-4">{dialogue.description}</p>
+                
+                {/* Genre and Tags */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
+                    {dialogue.genre}
+                  </span>
+                  {dialogue.hashtags?.map((tag) => (
+                    <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-800 text-sm rounded">
+                      #{tag}
+                    </span>
+                  ))}
                 </div>
 
                 {/* Audio Player */}
                 <div className="mb-4">
-                  <audio controls src={dialogue.audioUrl} className="w-full" />
+                  <audio 
+                    controls 
+                    src={dialogue.audioUrl} 
+                    className="w-full"
+                    onPlay={() => handlePlay(dialogue.dialogueId)}
+                  />
                 </div>
 
-                {/* Interaction Buttons */}
-                <div className="flex items-center gap-4 border-t border-b py-3">
+                {/* Reactions */}
+                <div className="flex items-center gap-4 text-sm text-gray-500">
                   <button
                     onClick={() => handleAction(dialogue.dialogueId, 'like')}
-                    disabled={actionInProgress === dialogue.dialogueId}
+                    disabled={!!actionInProgress}
                     className={`flex items-center gap-1 ${
                       userReactions[dialogue.dialogueId] === 'LIKE'
                         ? 'text-blue-600'
-                        : 'text-gray-600 hover:text-blue-600'
-                    } ${
-                      actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
+                        : 'hover:text-blue-600'
                     }`}
                   >
                     <span>👍</span>
-                    <span>{dialogue.likes}</span>
+                    <span>{dialogue.likes || 0}</span>
                   </button>
                   <button
                     onClick={() => handleAction(dialogue.dialogueId, 'dislike')}
-                    disabled={actionInProgress === dialogue.dialogueId}
+                    disabled={!!actionInProgress}
                     className={`flex items-center gap-1 ${
                       userReactions[dialogue.dialogueId] === 'DISLIKE'
                         ? 'text-red-600'
-                        : 'text-gray-600 hover:text-red-600'
-                    } ${
-                      actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
+                        : 'hover:text-red-600'
                     }`}
                   >
                     <span>👎</span>
-                    <span>{dialogue.dislikes}</span>
+                    <span>{dialogue.dislikes || 0}</span>
                   </button>
-                </div>
-
-                {/* Comments */}
-                <div className="mt-4">
-                  <h3 className="font-medium text-gray-900 mb-2">Comments</h3>
-                  <div className="space-y-4">
-                    {dialogue.comments?.map((comment) => (
-                      <div key={`${dialogue.dialogueId}-${comment.commentId}`} className="bg-gray-50 p-3 rounded">
-                        <p className="text-gray-800">{comment.content}</p>
-                        <div className="mt-2 text-sm text-gray-500">
-                          <span>{new Date(comment.createdAt).toLocaleDateString()}</span>
-                          <span className="mx-2">•</span>
-                          <span>{comment.likes} likes</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Comment Input */}
-                  <div className="mt-4 flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Add a comment..."
-                      disabled={actionInProgress === dialogue.dialogueId}
-                      className={`flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        actionInProgress === dialogue.dialogueId ? 'opacity-50 cursor-not-allowed' : ''
-                      }`}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter') {
-                          const content = (e.target as HTMLInputElement).value
-                          if (content.trim()) {
-                            handleComment(dialogue.dialogueId, content)
-                            ;(e.target as HTMLInputElement).value = ''
-                          }
-                        }
-                      }}
-                    />
-                  </div>
+                  <span className="flex items-center gap-1">
+                    <span>💬</span>
+                    <span>{dialogue.comments?.length || 0}</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span>▶️</span>
+                    <span>{playCount[dialogue.dialogueId] || 0}</span>
+                  </span>
                 </div>
               </div>
             ))}
