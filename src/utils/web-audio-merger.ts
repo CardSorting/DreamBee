@@ -47,8 +47,21 @@ export class WebAudioMerger {
       // Download all audio segments
       const buffers = await this.downloadSegments(segments)
       
-      // Calculate total duration based on actual audio durations
-      const totalDuration = Math.max(...segments.map(s => s.endTime)) + 0.1 // Small padding
+      // Calculate proper start times to prevent overlaps
+      let currentTime = 0
+      const adjustedSegments = segments.map((segment, index) => {
+        const buffer = buffers[index]
+        const startTime = currentTime
+        currentTime += buffer.duration + 0.5 // Add 0.5s gap between segments
+        return {
+          ...segment,
+          adjustedStartTime: startTime,
+          duration: buffer.duration
+        }
+      })
+      
+      // Calculate total duration based on adjusted timings
+      const totalDuration = currentTime + 0.5 // Add final padding
       const outputBuffer = this.audioContext.createBuffer(
         2, // Number of channels (stereo)
         Math.ceil(this.audioContext.sampleRate * totalDuration),
@@ -61,7 +74,7 @@ export class WebAudioMerger {
         outputData.fill(0)
       }
       
-      // Process each segment using actual audio durations
+      // Process each segment
       for (let i = 0; i < segments.length; i++) {
         this.onProgress?.({
           stage: 'processing',
@@ -70,27 +83,16 @@ export class WebAudioMerger {
           totalSegments: segments.length
         })
         
-        const segment = segments[i]
+        const segment = adjustedSegments[i]
         const buffer = buffers[i]
-
-        // Calculate actual duration of this audio buffer
-        const segmentDuration = buffer.duration
-        const segmentStartTime = segment.startTime
-
-        // Convert time to samples
-        const startSample = Math.floor(segmentStartTime * this.audioContext.sampleRate)
-        const endSample = Math.floor((segmentStartTime + segmentDuration) * this.audioContext.sampleRate)
         
-        // Copy audio data to output buffer
+        // Use adjusted start time
+        const startSample = Math.floor(segment.adjustedStartTime * this.audioContext.sampleRate)
+        
+        // Copy each channel
         for (let channel = 0; channel < Math.min(buffer.numberOfChannels, outputBuffer.numberOfChannels); channel++) {
-          const inputData = buffer.getChannelData(channel)
-          const outputData = outputBuffer.getChannelData(channel)
-          
-          for (let j = 0; j < buffer.length && startSample + j < outputData.length; j++) {
-            if (startSample + j < outputData.length) {
-              outputData[startSample + j] = inputData[j]
-            }
-          }
+          const channelData = buffer.getChannelData(channel)
+          outputBuffer.copyToChannel(channelData, channel, startSample)
         }
       }
       
@@ -103,12 +105,13 @@ export class WebAudioMerger {
         }
       }
       
+      // Apply normalization if needed
       if (maxAmplitude > 1) {
-        const gain = 0.95 / maxAmplitude // Leave some headroom
+        const scale = 0.99 / maxAmplitude // Leave a tiny bit of headroom
         for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
           const outputData = outputBuffer.getChannelData(channel)
           for (let i = 0; i < outputData.length; i++) {
-            outputData[i] *= gain
+            outputData[i] *= scale
           }
         }
       }
