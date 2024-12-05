@@ -12,7 +12,7 @@ export class TranscriptionProcessor {
     const transcript = await this.client.transcripts.create({
       audio_url: audioUrl,
       speaker_labels: true,
-      speakers_expected: speakerNames.length || undefined,
+      speakers_expected: speakerNames.length || 2, // Default to 2 speakers if not specified
       language_code: "en_us"
     })
 
@@ -37,14 +37,22 @@ export class TranscriptionProcessor {
       if (result.status === 'completed') {
         // Ensure all speaker labels are consistent
         const cleanedUtterances = this.cleanUtterances(result.utterances || [])
-        const cleanedWords = this.cleanWords(result.words || [])
+        const cleanedWords = this.cleanWords(result.words || [], cleanedUtterances)
+
+        // Get unique speakers from utterances
+        const uniqueSpeakers = new Set<string>()
+        cleanedUtterances.forEach(utterance => {
+          if (utterance.speaker) {
+            uniqueSpeakers.add(utterance.speaker)
+          }
+        })
 
         return {
           text: result.text || '',
           status: result.status,
           utterances: cleanedUtterances,
           words: cleanedWords,
-          speakers: [],
+          speakers: Array.from(uniqueSpeakers),
           confidence: result.confidence || 0
         }
       }
@@ -58,20 +66,48 @@ export class TranscriptionProcessor {
   }
 
   private cleanUtterances(utterances: AssemblyAIUtterance[]): AssemblyAIUtterance[] {
-    return utterances.map(utterance => ({
-      ...utterance,
-      speaker: utterance.speaker || null,
-      words: utterance.words?.map(word => ({
-        ...word,
-        speaker: utterance.speaker || null
-      }))
-    }))
+    // Create a map of utterance time ranges to speakers
+    const speakerTimeMap = new Map<number, string>()
+    
+    utterances.forEach(utterance => {
+      if (utterance.speaker) {
+        speakerTimeMap.set(utterance.start, utterance.speaker)
+      }
+    })
+
+    return utterances.map(utterance => {
+      const speaker = utterance.speaker || speakerTimeMap.get(utterance.start) || null
+      
+      return {
+        ...utterance,
+        speaker,
+        words: utterance.words?.map(word => ({
+          ...word,
+          speaker
+        }))
+      }
+    })
   }
 
-  private cleanWords(words: AssemblyAIWord[]): AssemblyAIWord[] {
-    return words.map(word => ({
-      ...word,
-      speaker: word.speaker || null
-    }))
+  private cleanWords(words: AssemblyAIWord[], utterances: AssemblyAIUtterance[]): AssemblyAIWord[] {
+    // Create a map of time ranges to speakers from utterances
+    const speakerTimeRanges = utterances.reduce((map, utterance) => {
+      if (utterance.speaker) {
+        map.set([utterance.start, utterance.end], utterance.speaker)
+      }
+      return map
+    }, new Map<[number, number], string>())
+
+    return words.map(word => {
+      // Find the utterance time range this word belongs to
+      const range = Array.from(speakerTimeRanges.entries()).find(
+        ([[start, end]]) => word.start >= start && word.end <= end
+      )
+      
+      return {
+        ...word,
+        speaker: range ? speakerTimeRanges.get(range[0]) : null
+      }
+    })
   }
 }

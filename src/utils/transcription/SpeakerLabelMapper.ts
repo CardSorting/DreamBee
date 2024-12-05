@@ -28,7 +28,7 @@ export class SpeakerLabelMapper {
     )
 
     // Get the final list of mapped character names
-    const mappedCharacters = Array.from(this.speakerMap.values())
+    const mappedCharacters = Array.from(new Set(this.speakerNames.slice(0, response.speakers.length)))
 
     return {
       ...response,
@@ -42,27 +42,34 @@ export class SpeakerLabelMapper {
     // Clear existing mapping
     this.speakerMap.clear()
 
-    // Create ordered list of utterances by start time
-    const orderedUtterances = [...(response.utterances || [])].sort((a, b) => a.start - b.start)
-
-    // Track assigned character names to avoid duplicates
-    const assignedCharacters = new Set<string>()
-
-    // Map speakers based on first appearance
-    for (const utterance of orderedUtterances) {
-      if (utterance.speaker && !this.speakerMap.has(utterance.speaker)) {
-        // Find the next available character name
-        const availableCharacter = this.speakerNames.find(name => !assignedCharacters.has(name))
-        
-        if (availableCharacter) {
-          this.speakerMap.set(utterance.speaker, availableCharacter)
-          assignedCharacters.add(availableCharacter)
-        }
+    // Get unique speakers from the response
+    const uniqueSpeakers = new Set<string>()
+    response.utterances?.forEach(utterance => {
+      if (utterance.speaker) {
+        uniqueSpeakers.add(utterance.speaker)
       }
-    }
+    })
+
+    // Sort speakers by their first appearance
+    const sortedSpeakers = [...uniqueSpeakers].sort((a, b) => {
+      const firstA = response.utterances?.find(u => u.speaker === a)?.start || 0
+      const firstB = response.utterances?.find(u => u.speaker === b)?.start || 0
+      return firstA - firstB
+    })
+
+    // Map only the number of speakers we have names for
+    sortedSpeakers.forEach((speaker, index) => {
+      if (index < this.speakerNames.length) {
+        this.speakerMap.set(speaker, this.speakerNames[index])
+      }
+    })
 
     // Log the mapping for debugging
-    console.log('Speaker to Character Mapping:', Object.fromEntries(this.speakerMap))
+    console.log('Speaker to Character Mapping:', 
+      Object.fromEntries(this.speakerMap),
+      'Number of speakers:', sortedSpeakers.length,
+      'Number of character names:', this.speakerNames.length
+    )
   }
 
   private mapUtteranceSpeaker(utterance: AssemblyAIUtterance): AssemblyAIUtterance {
