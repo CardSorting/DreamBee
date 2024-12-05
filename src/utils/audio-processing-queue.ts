@@ -79,7 +79,7 @@ class AudioProcessingQueue {
       this.lastRequestTime = Date.now()
       
       const processor = getAudioProcessor()
-      const result = await processor.generateSubtitles(
+      const result = await processor.processAudioWithQueue(
         item.audioUrl,
         item.options,
         item.onProgress

@@ -23,6 +23,9 @@ export async function persistAudioBlob(
 
     // Upload to S3
     const s3Url = await uploadToS3(blob, key, blob.type);
+    if (!s3Url) {
+      throw new Error('Failed to get S3 URL after upload');
+    }
 
     // Save record to DynamoDB
     const audioRecord = await saveAudioRecord({

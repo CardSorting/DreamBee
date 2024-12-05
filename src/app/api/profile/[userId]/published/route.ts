@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { QueryCommand } from '@aws-sdk/lib-dynamodb'
 import { DescribeTableCommand } from '@aws-sdk/client-dynamodb'
-import { docClient, rawClient } from '../../../../../utils/dynamodb/client'
+import { docClient, ddbClient } from '../../../../../utils/dynamodb/client'
 import { PublishedDialogue } from '../../../../../utils/dynamodb/schema'
 
 interface PaginationInfo {
@@ -34,7 +34,7 @@ export async function GET(
       const describeTableCommand = new DescribeTableCommand({
         TableName: process.env.DYNAMODB_TABLE!
       })
-      await rawClient.send(describeTableCommand)
+      await ddbClient.send(describeTableCommand)
       console.log('Table exists and is accessible')
     } catch (tableError) {
       console.error('Error checking table:', tableError)

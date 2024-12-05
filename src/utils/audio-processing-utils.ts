@@ -1,7 +1,7 @@
 import { getAudioMerger, AudioSegmentInfo } from './audio-merger'
 import { getAudioProcessor } from './assemblyai'
 import { persistAudioBlob } from './audio-persistence'
-import { auth } from '@clerk/nextjs'
+import { currentUser } from '@clerk/nextjs/server'
 
 export interface ProcessingStatus {
   stage: 'prefetch' | 'processing' | 'normalizing' | 'complete'
@@ -40,11 +40,11 @@ export async function getCompatibleAudioMerger(onProgress?: (status: ProcessingS
       const result = await originalAudioMerger.mergeAudioSegments(segments, conversationId)
       
       // Get the current user's ID
-      const { userId } = auth();
+      const user = await currentUser();
       
-      if (userId && result.blob) {
+      if (user?.id && result instanceof Blob) {
         // Persist the merged audio
-        await persistAudioBlob(result.blob, userId, {
+        await persistAudioBlob(result, user.id, {
           segments,
           conversationId
         });
