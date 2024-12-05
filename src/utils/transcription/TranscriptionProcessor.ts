@@ -12,8 +12,7 @@ export class TranscriptionProcessor {
     const transcript = await this.client.transcripts.create({
       audio_url: audioUrl,
       speaker_labels: true,
-      speakers_expected: speakerNames.length,
-      word_boost: speakerNames,
+      speakers_expected: speakerNames.length || undefined,
       language_code: "en_us"
     })
 
@@ -25,56 +24,54 @@ export class TranscriptionProcessor {
   }
 
   async getTranscriptResult(transcriptId: string): Promise<TranscriptionResponse> {
-    const result = await this.client.transcripts.get(transcriptId)
+    const maxAttempts = 60 // 5 minutes with 5-second intervals
+    let attempts = 0
 
-    if (result.status === 'error' || result.error) {
-      throw new Error(result.error || 'Transcription failed')
+    while (attempts < maxAttempts) {
+      const result = await this.client.transcripts.get(transcriptId)
+
+      if (result.status === 'error' || result.error) {
+        throw new Error(result.error || 'Transcription failed')
+      }
+
+      if (result.status === 'completed') {
+        // Ensure all speaker labels are consistent
+        const cleanedUtterances = this.cleanUtterances(result.utterances || [])
+        const cleanedWords = this.cleanWords(result.words || [])
+
+        return {
+          text: result.text || '',
+          status: result.status,
+          utterances: cleanedUtterances,
+          words: cleanedWords,
+          speakers: [],
+          confidence: result.confidence || 0
+        }
+      }
+
+      // Wait 5 seconds before next attempt
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      attempts++
     }
 
-    if (result.status !== 'completed') {
-      throw new Error('Transcription timed out')
-    }
-
-    return {
-      text: result.text || '',
-      status: result.status,
-      utterances: result.utterances || [],
-      words: result.words || [],
-      speakers: [],
-      confidence: result.confidence || 0
-    }
+    throw new Error('Transcription timed out')
   }
 
-  cleanTranscriptionResponse(response: TranscriptionResponse): TranscriptionResponse {
-    return {
-      text: response.text || '',
-      status: response.status,
-      utterances: response.utterances?.map(u => this.cleanUtterance(u)) || [],
-      words: response.words.map(w => this.cleanWord(w)),
-      speakers: response.speakers,
-      confidence: response.confidence,
-      audioUrl: response.audioUrl
-    }
-  }
-
-  private cleanUtterance(utterance: AssemblyAIUtterance): AssemblyAIUtterance {
-    return {
-      text: utterance.text || '',
-      start: utterance.start,
-      end: utterance.end,
-      confidence: utterance.confidence || 0,
+  private cleanUtterances(utterances: AssemblyAIUtterance[]): AssemblyAIUtterance[] {
+    return utterances.map(utterance => ({
+      ...utterance,
       speaker: utterance.speaker || null,
-      words: utterance.words?.map(w => this.cleanWord(w)) || []
-    }
+      words: utterance.words?.map(word => ({
+        ...word,
+        speaker: utterance.speaker || null
+      }))
+    }))
   }
 
-  private cleanWord(word: AssemblyAIWord): AssemblyAIWord {
-    return {
-      text: word.text || '',
-      start: word.start,
-      end: word.end,
-      confidence: word.confidence || 0,
+  private cleanWords(words: AssemblyAIWord[]): AssemblyAIWord[] {
+    return words.map(word => ({
+      ...word,
       speaker: word.speaker || null
-    }
+    }))
   }
 }

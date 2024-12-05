@@ -14,7 +14,7 @@ export class SpeakerLabelMapper {
       return response
     }
 
-    // Initialize speaker mapping
+    // Initialize speaker mapping based on first appearances
     this.initializeSpeakerMap(response)
 
     // Map utterances
@@ -27,19 +27,14 @@ export class SpeakerLabelMapper {
       this.mapWordSpeaker(word)
     )
 
-    // Extract unique speakers (now using character names)
-    const speakerSet = new Set<string>()
-    mappedUtterances.forEach(utterance => {
-      if (utterance.speaker) {
-        speakerSet.add(utterance.speaker)
-      }
-    })
+    // Get the final list of mapped character names
+    const mappedCharacters = Array.from(this.speakerMap.values())
 
     return {
       ...response,
       utterances: mappedUtterances,
       words: mappedWords,
-      speakers: Array.from(speakerSet)
+      speakers: mappedCharacters
     }
   }
 
@@ -47,28 +42,35 @@ export class SpeakerLabelMapper {
     // Clear existing mapping
     this.speakerMap.clear()
 
-    // Get unique speakers from the response
-    const uniqueSpeakers = new Set<string>()
-    response.utterances?.forEach(utterance => {
-      if (utterance.speaker) {
-        uniqueSpeakers.add(utterance.speaker)
-      }
-    })
+    // Create ordered list of utterances by start time
+    const orderedUtterances = [...(response.utterances || [])].sort((a, b) => a.start - b.start)
 
-    // Sort speakers to ensure consistent mapping
-    const sortedSpeakers = Array.from(uniqueSpeakers).sort()
+    // Track assigned character names to avoid duplicates
+    const assignedCharacters = new Set<string>()
 
-    // Map each speaker to a character name
-    sortedSpeakers.forEach((speaker, index) => {
-      if (index < this.speakerNames.length) {
-        this.speakerMap.set(speaker, this.speakerNames[index])
+    // Map speakers based on first appearance
+    for (const utterance of orderedUtterances) {
+      if (utterance.speaker && !this.speakerMap.has(utterance.speaker)) {
+        // Find the next available character name
+        const availableCharacter = this.speakerNames.find(name => !assignedCharacters.has(name))
+        
+        if (availableCharacter) {
+          this.speakerMap.set(utterance.speaker, availableCharacter)
+          assignedCharacters.add(availableCharacter)
+        }
       }
-    })
+    }
+
+    // Log the mapping for debugging
+    console.log('Speaker to Character Mapping:', Object.fromEntries(this.speakerMap))
   }
 
   private mapUtteranceSpeaker(utterance: AssemblyAIUtterance): AssemblyAIUtterance {
-    const characterName = utterance.speaker ? 
-      this.speakerMap.get(utterance.speaker) || utterance.speaker : null
+    if (!utterance.speaker || !this.speakerMap.has(utterance.speaker)) {
+      return utterance
+    }
+
+    const characterName = this.speakerMap.get(utterance.speaker)!
 
     return {
       ...utterance,
@@ -81,12 +83,13 @@ export class SpeakerLabelMapper {
   }
 
   private mapWordSpeaker(word: AssemblyAIWord): AssemblyAIWord {
-    const characterName = word.speaker ? 
-      this.speakerMap.get(word.speaker) || word.speaker : null
-    
+    if (!word.speaker || !this.speakerMap.has(word.speaker)) {
+      return word
+    }
+
     return {
       ...word,
-      speaker: characterName
+      speaker: this.speakerMap.get(word.speaker)!
     }
   }
 }
