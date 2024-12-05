@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { AssemblyAI } from 'assemblyai'
 
-const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY
+const ASSEMBLYAI_API_KEY = process.env.NEXT_PUBLIC_ASSEMBLYAI_API_KEY
 
 interface ProcessingOptions {
   speakerDetection?: boolean
@@ -99,7 +99,7 @@ export class AssemblyAIProcessor {
 
   constructor() {
     if (!ASSEMBLYAI_API_KEY) {
-      throw new Error('ASSEMBLYAI_API_KEY is not set')
+      throw new Error('NEXT_PUBLIC_ASSEMBLYAI_API_KEY is not set')
     }
     this.client = new AssemblyAI({
       apiKey: ASSEMBLYAI_API_KEY
@@ -107,14 +107,15 @@ export class AssemblyAIProcessor {
   }
 
   private handleError(error: any): never {
-    console.error('AssemblyAI API Error:', error)
+    let errorMessage = 'An unexpected error occurred while processing audio'
+    
     if (error.response?.data?.error) {
-      throw new Error(error.response.data.error)
+      errorMessage = error.response.data.error
     } else if (error.message) {
-      throw new Error(error.message)
-    } else {
-      throw new Error('An unexpected error occurred while processing audio')
+      errorMessage = error.message
     }
+    
+    throw new Error(errorMessage)
   }
 
   async generateSubtitles(audioUrl: string, options: ProcessingOptions = {}): Promise<TranscriptionResult> {

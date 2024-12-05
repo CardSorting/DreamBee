@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback, useRef, memo } from 'react'
 import { getWebAudioMerger } from '../../../utils/web-audio-merger'
-import { getAudioProcessor } from '../../../utils/assemblyai'
 import { TimeFormatter } from './utils/TimeFormatter'
 import { AudioPreviewProps, Subtitle } from './utils/types'
 import { PlayButton } from './components/PlayButton'
@@ -62,7 +61,6 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
   const [subtitles, setSubtitles] = useState<Subtitle[]>([])
   const [timingAdjustments, setTimingAdjustments] = useState<{ [key: string]: number }>({})
 
-  const audioProcessor = useRef(getAudioProcessor())
   const webAudioMerger = useRef(getWebAudioMerger())
 
   const handleMergeProgress = useCallback((progress: MergeProgress) => {
@@ -89,40 +87,48 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
         const mergeResult = await webAudioMerger.current.mergeAudioSegments(audioSegments)
         setTimingAdjustments(mergeResult.timingAdjustments)
 
-        // Create object URL for the merged audio blob
-        const url = URL.createObjectURL(mergeResult.blob)
-        setAudioUrl(url)
+        setIsProcessing(true)
+        setProcessingStatus('Processing audio...')
 
-        // Process with AssemblyAI
-        if (userId) {
-          const response = await audioProcessor.current.processAudioWithQueue(
-            url,
-            {
-              speakerDetection: true,
-              wordTimestamps: true,
-              speakerNames: result.audioUrls.map(a => a.character),
-              userId: userId
-            },
-            (progress: number) => {
-              setProcessingProgress(progress)
-              setProcessingStatus('Generating transcription')
-            }
-          )
+        // Create a FormData object to send the blob
+        const formData = new FormData()
+        formData.append('audio', mergeResult.blob)
+        formData.append('options', JSON.stringify({
+          speakerDetection: true,
+          wordTimestamps: true,
+          speakerNames: result.audioUrls.map(a => a.character)
+        }))
 
-          if (response?.subtitles) {
-            const processedSubtitles = response.subtitles.map((sub: AssemblyAISubtitle, index: number) => ({
-              id: `subtitle-${index}`,
-              text: sub.text,
-              start: sub.start,
-              end: sub.end,
-              words: sub.words || [],
-              speaker: sub.speaker || 'Speaker'
-            }))
-            setSubtitles(processedSubtitles)
-          }
+        // Call our API endpoint with FormData
+        const response = await fetch('/api/audio/transcribe', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.error || 'Failed to process audio')
+        }
+
+        const transcriptionResult = await response.json()
+
+        // Update audio URL to use the S3 URL
+        if (transcriptionResult.audioUrl) {
+          setAudioUrl(transcriptionResult.audioUrl)
+        }
+
+        if (transcriptionResult?.utterances) {
+          const processedSubtitles = transcriptionResult.utterances.map((sub: any, index: number) => ({
+            id: `subtitle-${index}`,
+            text: sub.text,
+            start: sub.start,
+            end: sub.end,
+            words: sub.words || [],
+            speaker: sub.speaker || 'Speaker'
+          }))
+          setSubtitles(processedSubtitles)
         }
       } catch (error) {
-        console.error('Error processing audio:', error)
         onError(error instanceof Error ? error.message : 'An unknown error occurred')
       } finally {
         setIsProcessing(false)
