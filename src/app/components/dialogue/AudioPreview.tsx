@@ -51,7 +51,7 @@ const createEmptySubtitle = (id: string): Subtitle => ({
   words: []
 })
 
-function AudioPreview({ result, onError }: AudioPreviewProps) {
+export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
   const { userId } = useClerkAuth()
   const [audioUrl, setAudioUrl] = useState<string>('')
   const [isProcessing, setIsProcessing] = useState(false)
@@ -183,6 +183,8 @@ function AudioPreview({ result, onError }: AudioPreviewProps) {
       />
     </div>
   )
-}
+})
 
-export default memo(AudioPreview)
+AudioPreview.displayName = 'AudioPreview'
+
+export default AudioPreview

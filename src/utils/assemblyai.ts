@@ -1,9 +1,7 @@
 import axios from 'axios'
-import { AssemblyAI, Transcript } from 'assemblyai'
-import { audioQueue } from './audio-processing-queue'
+import { AssemblyAI } from 'assemblyai'
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY
-const ASSEMBLYAI_API_URL = 'https://api.assemblyai.com/v2'
 
 interface ProcessingOptions {
   speakerDetection?: boolean
@@ -86,8 +84,8 @@ interface Utterance {
   start: number
   end: number
   confidence: number
-  speaker: string | undefined
-  words: Array<{
+  speaker?: string
+  words?: Array<{
     text: string
     start: number
     end: number
@@ -101,79 +99,134 @@ export class AssemblyAIProcessor {
 
   constructor() {
     if (!ASSEMBLYAI_API_KEY) {
-      throw new Error('AssemblyAI API key not configured')
+      throw new Error('ASSEMBLYAI_API_KEY is not set')
     }
     this.client = new AssemblyAI({
       apiKey: ASSEMBLYAI_API_KEY
     })
   }
 
-  private async waitForTranscript(transcriptId: string): Promise<ProcessedTranscript> {
-    const maxAttempts = 60 // 5 minutes with 5-second intervals
-    let attempts = 0
-
-    while (attempts < maxAttempts) {
-      const transcript = await this.client.transcripts.get(transcriptId) as ProcessedTranscript
-
-      if (transcript.status === 'completed') {
-        console.log('Raw transcript:', {
-          utterances: transcript.utterances?.map(u => ({
-            text: u.text,
-            start: u.start,
-            end: u.end,
-            speaker: u.speaker
-          })),
-          words: transcript.words?.length
-        })
-        return transcript
-      }
-
-      if (transcript.status === 'error' || transcript.error) {
-        throw new Error(transcript.error || 'Transcription failed')
-      }
-
-      // Wait 5 seconds before checking again
-      await new Promise(resolve => setTimeout(resolve, 5000))
-      attempts++
+  private handleError(error: any): never {
+    console.error('AssemblyAI API Error:', error)
+    if (error.response?.data?.error) {
+      throw new Error(error.response.data.error)
+    } else if (error.message) {
+      throw new Error(error.message)
+    } else {
+      throw new Error('An unexpected error occurred while processing audio')
     }
-
-    throw new Error('Transcription timed out')
   }
 
-  private async handleError(error: any): Promise<never> {
-    console.error('AssemblyAI API Error:', error)
-
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status
-      const errorMessage = error.response?.data?.error || error.message
-
-      if (status === 429) {
-        throw new Error('Rate limit exceeded. Please try again in about an hour. (AssemblyAI API rate limit)')
-      } else if (status === 401) {
-        throw new Error('Invalid API key or authentication error. Please check your AssemblyAI API key.')
-      } else if (status === 400) {
-        throw new Error(`Bad request: ${errorMessage}`)
-      } else if (status === 500) {
-        throw new Error('AssemblyAI service error. Please try again later.')
+  async generateSubtitles(audioUrl: string, options: ProcessingOptions = {}): Promise<TranscriptionResult> {
+    try {
+      // Configure transcript parameters
+      const params: any = {
+        audio_url: audioUrl,
+        speaker_labels: options.speakerDetection || false,
+        word_boost: options.speakerNames || [],
+        auto_highlights: true,
+        entity_detection: true,
+        auto_chapters: true
       }
-    }
 
-    throw new Error('An unexpected error occurred while processing audio: ' + (error.message || 'Unknown error'))
+      // Create transcript
+      const transcript = await this.client.transcripts.create(params)
+
+      if (!transcript?.id) {
+        throw new Error('Failed to create transcript')
+      }
+
+      // Wait for completion
+      const result = await this.waitWithRetry(transcript.id)
+
+      // Process the result into our format
+      const processedResult: TranscriptionResult = {
+        text: result.text,
+        words: result.words.map(word => ({
+          text: word.text,
+          start: word.start,
+          end: word.end,
+          confidence: word.confidence,
+          speaker: word.speaker
+        })),
+        subtitles: (result.utterances || []).map(utterance => ({
+          text: utterance.text,
+          start: utterance.start,
+          end: utterance.end,
+          confidence: utterance.confidence,
+          speaker: utterance.speaker,
+          words: utterance.words || []
+        })),
+        speakers: result.speakers || [],
+        confidence: result.confidence,
+        simpleAudioPlayerTranscript: {
+          srt: this.generateSRT(result.utterances || []),
+          vtt: this.generateVTT(result.utterances || []),
+          json: {
+            subtitles: (result.utterances || []).map(utterance => ({
+              text: utterance.text,
+              start: utterance.start,
+              end: utterance.end,
+              words: utterance.words || [],
+              speaker: utterance.speaker,
+              confidence: utterance.confidence
+            }))
+          }
+        }
+      }
+
+      return processedResult
+    } catch (error) {
+      this.handleError(error)
+    }
   }
 
   private async waitWithRetry(transcriptId: string, retryCount = 0, maxRetries = 3): Promise<ProcessedTranscript> {
     try {
-      return await this.waitForTranscript(transcriptId)
-    } catch (error: any) {
-      if (axios.isAxiosError(error) && error.response?.status === 429 && retryCount < maxRetries) {
-        // Wait for exponential backoff time before retrying
-        const waitTime = Math.pow(2, retryCount) * 1000
-        console.log(`Rate limit hit, waiting ${waitTime}ms before retry ${retryCount + 1}/${maxRetries}`)
-        await new Promise(resolve => setTimeout(resolve, waitTime))
+      const result = await this.client.transcripts.get(transcriptId)
+
+      if (result.status === 'error') {
+        throw new Error(result.error || 'Transcription failed')
+      }
+
+      if (result.status !== 'completed') {
+        if (retryCount >= maxRetries) {
+          throw new Error('Max retries reached waiting for transcript')
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000))
         return this.waitWithRetry(transcriptId, retryCount + 1, maxRetries)
       }
-      throw error
+
+      return result as ProcessedTranscript
+    } catch (error) {
+      this.handleError(error)
     }
+  }
+
+  private generateSRT(utterances: Utterance[]): string {
+    return utterances.map((utterance, index) => {
+      const startTime = this.formatTimestamp(utterance.start)
+      const endTime = this.formatTimestamp(utterance.end)
+      return `${index + 1}\n${startTime} --> ${endTime}\n${utterance.text}\n\n`
+    }).join('')
+  }
+
+  private generateVTT(utterances: Utterance[]): string {
+    return 'WEBVTT\n\n' + utterances.map((utterance, index) => {
+      const startTime = this.formatTimestamp(utterance.start)
+      const endTime = this.formatTimestamp(utterance.end)
+      return `${startTime} --> ${endTime}\n${utterance.text}\n\n`
+    }).join('')
+  }
+
+  private formatTimestamp(ms: number): string {
+    const totalSeconds = Math.floor(ms / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    const milliseconds = ms % 1000
+
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`
   }
 
   async processAudioWithQueue(
@@ -182,84 +235,11 @@ export class AssemblyAIProcessor {
     onProgress?: (progress: number) => void
   ): Promise<TranscriptionResult> {
     try {
-      const result = await audioQueue.add(
-        async () => {
-          const transcription = await this.generateSubtitles(audioUrl, options, onProgress)
-          return transcription
-        },
-        {
-          onProgress,
-          userId: options.userId
-        }
-      )
+      // Add to queue and wait for processing
+      const result = await this.generateSubtitles(audioUrl, options)
       return result
     } catch (error) {
-      console.error('Error processing audio:', error)
-      throw error
-    }
-  }
-
-  async generateSubtitles(
-    audioUrl: string,
-    options: ProcessingOptions = {},
-    onProgress?: (progress: number) => void
-  ): Promise<TranscriptionResult> {
-    try {
-      // Configure transcription parameters
-      const params: any = {
-        audio_url: audioUrl,
-        speaker_labels: options.speakerDetection,
-        word_boost: options.speakerNames,
-        words_per_entry: 25
-      }
-
-      // Create transcript
-      const transcript = await this.client.transcripts.create(params)
-      
-      if (!transcript?.id) {
-        throw new Error('Failed to create transcript')
-      }
-
-      // Wait for completion
-      const result = await this.waitForTranscript(transcript.id)
-      
-      if (result.error) {
-        throw new Error(result.error)
-      }
-
-      // Process the result into our format
-      const processedResult: TranscriptionResult = {
-        text: result.text,
-        words: result.words || [],
-        subtitles: result.utterances?.map(u => ({
-          text: u.text,
-          start: u.start,
-          end: u.end,
-          words: u.words || [],
-          speaker: u.speaker,
-          confidence: u.confidence
-        })) || [],
-        speakers: result.speakers || [],
-        confidence: result.confidence || 0,
-        simpleAudioPlayerTranscript: {
-          srt: result.subtitles_srt || '',
-          vtt: result.subtitles_vtt || '',
-          json: {
-            subtitles: result.utterances?.map(u => ({
-              text: u.text,
-              start: u.start,
-              end: u.end,
-              words: u.words || [],
-              speaker: u.speaker,
-              confidence: u.confidence
-            })) || []
-          }
-        }
-      }
-
-      return processedResult
-    } catch (error) {
-      return this.handleError(error)
+      this.handleError(error)
     }
   }
 }
