@@ -75,7 +75,26 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
     const processAudio = async () => {
       try {
         setIsProcessing(true)
+        setProcessingStatus('Loading audio...')
         
+        // If there's only one audio URL, use it directly
+        if (result.audioUrls.length === 1) {
+          setAudioUrl(result.audioUrls[0].directUrl)
+          if (result.transcript?.json?.subtitles) {
+            const processedSubtitles = result.transcript.json.subtitles.map((sub: any, index: number) => ({
+              id: `subtitle-${index}`,
+              text: sub.text,
+              start: sub.start,
+              end: sub.end,
+              words: sub.words || [],
+              speaker: sub.speaker || result.audioUrls[0]?.character || 'System'
+            }))
+            setSubtitles(processedSubtitles)
+          }
+          setIsProcessing(false)
+          return
+        }
+
         // Create audio segments from the result
         const audioSegments = result.audioUrls.map((audio, index) => ({
           url: audio.directUrl,
@@ -85,67 +104,37 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
           previousCharacter: index > 0 ? result.audioUrls[index - 1].character : undefined
         }))
 
+        // Merge audio segments
         const mergeResult = await webAudioMerger.current.mergeAudioSegments(audioSegments)
         setTimingAdjustments(mergeResult.timingAdjustments)
 
-        setIsProcessing(true)
-        setProcessingStatus('Processing audio...')
+        // Create object URL for the merged audio
+        const objectUrl = URL.createObjectURL(mergeResult.blob)
+        setAudioUrl(objectUrl)
 
-        // Create a FormData object to send the blob
-        const formData = new FormData()
-        formData.append('audio', mergeResult.blob)
-        formData.append('options', JSON.stringify({
-          speakerDetection: true,
-          wordTimestamps: true,
-          speakerNames: result.audioUrls.map(a => a.character)
-        }))
-
-        // Call our API endpoint with FormData
-        const response = await fetch('/api/audio/transcribe', {
-          method: 'POST',
-          body: formData,
-        })
-
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.error || 'Failed to process audio')
-        }
-
-        const transcriptionResult = await response.json()
-
-        // Update audio URL to use the S3 URL
-        if (transcriptionResult.audioUrl) {
-          console.log('Setting audio URL:', transcriptionResult.audioUrl)
-          setAudioUrl(transcriptionResult.audioUrl)
-          // Pre-fetch the audio to ensure it's accessible
-          const audioResponse = await fetch(transcriptionResult.audioUrl)
-          if (!audioResponse.ok) {
-            throw new Error('Failed to access audio file')
-          }
-        } else {
-          throw new Error('No audio URL in response')
-        }
-
-        if (transcriptionResult?.utterances) {
-          const processedSubtitles = transcriptionResult.utterances.map((sub: any, index: number) => ({
+        // Set subtitles from the transcript
+        if (result.transcript?.json?.subtitles) {
+          const processedSubtitles = result.transcript.json.subtitles.map((sub: any, index: number) => ({
             id: `subtitle-${index}`,
             text: sub.text,
             start: sub.start,
             end: sub.end,
             words: sub.words || [],
-            speaker: sub.speaker || result.audioUrls[index]?.character || 'Bees Buzzing'
+            speaker: sub.speaker || result.audioUrls[index]?.character || 'System'
           }))
           setSubtitles(processedSubtitles)
         }
+
+        setIsProcessing(false)
       } catch (error) {
-        onError(error instanceof Error ? error.message : 'An unknown error occurred')
-      } finally {
+        console.error('Error processing audio:', error)
+        onError('Failed to process audio')
         setIsProcessing(false)
       }
     }
 
     processAudio()
-  }, [result?.audioUrls, userId, onError])
+  }, [result?.audioUrls, result?.transcript, onError])
 
   // Cleanup
   useEffect(() => {

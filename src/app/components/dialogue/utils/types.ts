@@ -1,4 +1,5 @@
 export interface GenerationResult {
+  dialogueId: string
   title: string
   audioUrls: Array<{
     character: string

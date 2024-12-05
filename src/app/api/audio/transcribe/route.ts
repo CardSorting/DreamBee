@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       ContentType: 'audio/mpeg'
     }))
 
-    const s3Url = `https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`
+    const s3Url = `https://${BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${s3Key}`
 
     // Upload audio to AssemblyAI
     const uploadResponse = await axios.post(`${ASSEMBLYAI_API_URL}/upload`, audioBuffer, {
@@ -112,19 +112,47 @@ export async function POST(req: NextRequest) {
     await docClient.send(new PutCommand({
       TableName: DYNAMODB_TABLE,
       Item: {
-        PK: `USER#${userId}`,
-        SK: `AUDIO#${audioId}`,
-        type: 'audio',
+        pk: `USER#${userId}`,
+        sk: `MDLG#${audioId}`,
+        type: 'MANUAL_DIALOGUE',
         userId,
         audioId,
+        dialogueId: audioId,
+        status: 'completed',
+        isChunked: false,
         audioUrl: s3Url,
         metadata,
         transcript,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPublished: false
       }
     }))
 
-    return NextResponse.json(response)
+    // Return response in the expected GenerationResult format
+    return NextResponse.json({
+      dialogueId: audioId,
+      title: '', 
+      audioUrls: [{
+        character: 'System',
+        url: s3Url,
+        directUrl: s3Url
+      }],
+      metadata,
+      transcript,
+      assemblyAiResult: {
+        text: response.text,
+        subtitles: response.utterances?.map(u => ({
+          text: u.text,
+          start: u.start,
+          end: u.end,
+          words: u.words,
+          speaker: u.speaker
+        })) || [],
+        speakers: response.speakers,
+        confidence: response.confidence
+      }
+    })
   } catch (error: any) {
     console.error('AssemblyAI API Error:', error)
     return NextResponse.json(

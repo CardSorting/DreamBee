@@ -118,10 +118,14 @@ export default function ManualDialogueCreator({
       setIsPublishing(true)
       setError(null)
 
-      // First, create a unique dialogueId if not provided
-      const dialogueId = crypto.randomUUID()
+      // Get the audioId from the result
+      const audioId = result.dialogueId
 
-      const response = await fetch(`/api/dialogues/${dialogueId}/publish`, {
+      if (!audioId) {
+        throw new Error('Could not get audio ID from result')
+      }
+
+      const response = await fetch(`/api/dialogues/${audioId}/publish`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

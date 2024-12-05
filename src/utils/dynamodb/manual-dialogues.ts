@@ -13,11 +13,10 @@ import {
   DialogueSession
 } from './types'
 
-const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE || 'manual-dialogues'
+const MANUAL_DIALOGUES_TABLE = 'nextjs-clerk-audio-records'
 
 // Log environment setup
 console.log('[Manual Dialogues] Environment check:', {
-  hasTableName: !!process.env.DYNAMODB_MANUAL_DIALOGUES_TABLE,
   tableName: MANUAL_DIALOGUES_TABLE,
   nodeEnv: process.env.NODE_ENV,
   isServer: typeof window === 'undefined'

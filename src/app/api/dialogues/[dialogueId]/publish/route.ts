@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@clerk/nextjs/server'
-import { publishDialogue, unpublishDialogue } from '../../../../../utils/dynamodb/operations'
-import { DIALOGUE_GENRES } from '../../../../../utils/dynamodb/types'
+import { publishDialogue, unpublishDialogue } from '@/utils/dynamodb/operations'
+import { DIALOGUE_GENRES } from '@/utils/dynamodb/types'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 
@@ -10,26 +10,28 @@ const docClient = DynamoDBDocumentClient.from(ddbClient)
 
 export async function POST(
   request: NextRequest,
-  context: { params: { dialogueId: string } }
+  { params }: { params: { dialogueId: string } }
 ) {
   try {
     const { userId } = getAuth(request)
     if (!userId) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Unauthorized' }),
+      return NextResponse.json(
+        { error: 'Unauthorized' },
         { status: 401 }
       )
     }
 
+    const { dialogueId } = await params
     const body = await request.json()
-    const dialogueId = await context.params.dialogueId
+
+    console.log('Publishing dialogue:', { userId, dialogueId })
 
     // Validate required fields
     const requiredFields = ['genre', 'title', 'description', 'hashtags']
     for (const field of requiredFields) {
       if (!body[field]) {
-        return new NextResponse(
-          JSON.stringify({ error: `Missing required field: ${field}` }),
+        return NextResponse.json(
+          { error: `Missing required field: ${field}` },
           { status: 400 }
         )
       }
@@ -37,8 +39,8 @@ export async function POST(
 
     // Validate genre
     if (!DIALOGUE_GENRES.includes(body.genre)) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Invalid genre' }),
+      return NextResponse.json(
+        { error: 'Invalid genre' },
         { status: 400 }
       )
     }
@@ -53,14 +55,11 @@ export async function POST(
       hashtags: body.hashtags
     })
 
-    return new NextResponse(
-      JSON.stringify({ success: true }),
-      { status: 200 }
-    )
+    return NextResponse.json({ message: 'Dialogue published successfully' })
   } catch (error) {
     console.error('Error in publish route:', error)
-    return new NextResponse(
-      JSON.stringify({ error: 'Failed to publish dialogue' }),
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to publish dialogue' },
       { status: 500 }
     )
   }
@@ -68,28 +67,27 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { dialogueId: string } }
+  { params }: { params: { dialogueId: string } }
 ) {
   try {
     const { userId } = getAuth(request)
     if (!userId) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Unauthorized' }),
+      return NextResponse.json(
+        { error: 'Unauthorized' },
         { status: 401 }
       )
     }
 
-    const dialogueId = await context.params.dialogueId
+    const { dialogueId } = await params
+    console.log('Unpublishing dialogue:', { userId, dialogueId })
+
     await unpublishDialogue(userId, dialogueId)
 
-    return new NextResponse(
-      JSON.stringify({ success: true }),
-      { status: 200 }
-    )
+    return NextResponse.json({ message: 'Dialogue unpublished successfully' })
   } catch (error) {
     console.error('Error in unpublish route:', error)
-    return new NextResponse(
-      JSON.stringify({ error: 'Failed to unpublish dialogue' }),
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to unpublish dialogue' },
       { status: 500 }
     )
   }
