@@ -75,7 +75,12 @@ export async function POST(req: NextRequest) {
     // Initialize AWS clients
     const s3Client = new S3Client({ region: AWS_REGION })
     const ddbClient = new DynamoDBClient({ region: AWS_REGION })
-    const docClient = DynamoDBDocumentClient.from(ddbClient)
+    const docClient = DynamoDBDocumentClient.from(ddbClient, {
+      marshallOptions: {
+        removeUndefinedValues: true,
+        convertEmptyValues: true
+      }
+    })
 
     // Upload to S3
     const audioBuffer = Buffer.from(await audioFile.arrayBuffer())
@@ -89,7 +94,7 @@ export async function POST(req: NextRequest) {
       ContentType: 'audio/mpeg'
     }))
 
-    const s3Url = `https://${BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${s3Key}`
+    const s3Url = `https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`
 
     // Upload audio to AssemblyAI
     const uploadResponse = await axios.post(`${ASSEMBLYAI_API_URL}/upload`, audioBuffer, {
@@ -170,6 +175,36 @@ export async function POST(req: NextRequest) {
       response.speakers = Array.from(speakerSet)
     }
 
+    // Clean up the response object before saving to DynamoDB
+    const cleanResponse = {
+      text: response.text || '',
+      status: response.status,
+      utterances: response.utterances?.map(u => ({
+        text: u.text || '',
+        start: u.start,
+        end: u.end,
+        confidence: u.confidence || 0,
+        speaker: u.speaker || null,
+        words: u.words?.map(w => ({
+          text: w.text || '',
+          start: w.start,
+          end: w.end,
+          confidence: w.confidence || 0,
+          speaker: w.speaker || null
+        })) || []
+      })) || [],
+      words: response.words.map(w => ({
+        text: w.text || '',
+        start: w.start,
+        end: w.end,
+        confidence: w.confidence || 0,
+        speaker: w.speaker || null
+      })),
+      speakers: response.speakers,
+      confidence: response.confidence,
+      audioUrl: s3Url
+    }
+
     // Save to DynamoDB
     await docClient.send(new PutCommand({
       TableName: DYNAMODB_TABLE,
@@ -179,7 +214,7 @@ export async function POST(req: NextRequest) {
         userId,
         audioId,
         audioUrl: s3Url,
-        transcript: response,
+        transcript: cleanResponse,
         createdAt: new Date().toISOString(),
         type: 'audio'
       }

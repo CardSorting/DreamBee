@@ -114,7 +114,15 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
 
         // Update audio URL to use the S3 URL
         if (transcriptionResult.audioUrl) {
+          console.log('Setting audio URL:', transcriptionResult.audioUrl)
           setAudioUrl(transcriptionResult.audioUrl)
+          // Pre-fetch the audio to ensure it's accessible
+          const audioResponse = await fetch(transcriptionResult.audioUrl)
+          if (!audioResponse.ok) {
+            throw new Error('Failed to access audio file')
+          }
+        } else {
+          throw new Error('No audio URL in response')
         }
 
         if (transcriptionResult?.utterances) {
