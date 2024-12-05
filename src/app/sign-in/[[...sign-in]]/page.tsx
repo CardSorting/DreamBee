@@ -1,6 +1,12 @@
+'use client';
+
 import { SignIn } from "@clerk/nextjs";
+import { useSearchParams } from 'next/navigation';
 
 export default function Page() {
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get('redirect_url') || '/dashboard';
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-black via-gray-900 to-black p-4">
       <div className="w-full max-w-md">
@@ -12,7 +18,7 @@ export default function Page() {
               footerActionLink: "text-purple-400 hover:text-purple-300",
             },
           }}
-          redirectUrl="/dashboard" 
+          redirectUrl={redirectUrl}
         />
       </div>
     </div>

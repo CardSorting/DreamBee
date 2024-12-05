@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { CharacterVoice, PREDEFINED_VOICES } from '../../utils/voice-config'
-import { DialogueGenre } from '../../utils/dynamodb/types'
-import { DialogueSession } from '../../utils/dynamodb/types'
+import { Genre } from '@prisma/client'
+import { DialogueMetadata } from '@/types/dialogue'
 import { MetadataEditor } from './dialogue/MetadataEditor'
 import { CharacterManager } from './dialogue/CharacterManager'
 import { DialogueManager } from './dialogue/DialogueManager'
@@ -37,12 +37,12 @@ export default function ManualDialogueCreator({
 }: {
   onGenerationComplete?: (result: GenerationResult) => void
   dialogueId?: string
-  onSessionUpdate?: (sessions: DialogueSession[]) => void
+  onSessionUpdate?: (sessions: DialogueMetadata[]) => void
   initialData?: InitialData
 }) {
   // State
   const [title, setTitle] = useState(initialData?.title || '')
-  const [genre, setGenre] = useState<DialogueGenre>('Comedy')
+  const [genre, setGenre] = useState<Genre>(Genre.COMEDY)
   const [characters, setCharacters] = useState<CharacterVoice[]>(
     initialData?.characters || [defaultCharacter]
   )

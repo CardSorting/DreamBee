@@ -78,9 +78,9 @@ export interface UserItem extends BaseItem {
   type: 'USER'
   clerkId: string
   email: string
-  firstName?: string
-  lastName?: string
-  imageUrl?: string
+  first_name?: string
+  last_name?: string
+  image_url?: string
 }
 
 export interface ConversationItem extends BaseItem {
@@ -132,6 +132,8 @@ export interface ManualDialogueItem extends BaseItem {
   type: 'MANUAL_DIALOGUE'
   userId: string
   dialogueId: string
+  title: string
+  description: string
   status: 'processing' | 'completed' | 'error'
   isChunked: boolean
   audioSegments?: AudioSegment[]
@@ -146,6 +148,10 @@ export interface ManualDialogueItem extends BaseItem {
   }
   sessions: DialogueSession[]
   lastSessionId?: string
+  isPublished: boolean
+  audioUrl: string
+  hashtags: string[]
+  genre?: DialogueGenre
 }
 
 export interface DialogueTurn {

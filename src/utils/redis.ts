@@ -1,7 +1,8 @@
 import { Redis } from '@upstash/redis'
 import { REDIS_CONFIG } from './config'
-import { DialogueSession as DynamoDBDialogueSession } from './dynamodb/types'
 import { ChatCacheManager } from './chat-cache-manager'
+import { supabase } from './supabase'
+import { DialogueSession } from './dynamodb/types'
 
 interface ConversationMetadata {
   totalDuration: number
@@ -43,7 +44,7 @@ export interface ChatConversation {
 }
 
 interface DialogueSessionsResponse {
-  sessions: DynamoDBDialogueSession[]
+  sessions: any[]
   pagination: {
     currentPage: number
     pageSize: number
@@ -244,9 +245,70 @@ class RedisService {
         return JSON.parse(fallbackData)
       }
 
-      return null
+      // Try Supabase
+      const sessionId = `${userId}:${dialogueId}`
+      const { data, error } = await supabase
+        .from('dialogue_sessions')
+        .select('*')
+        .eq('session_id', sessionId)
+        .single()
+
+      if (error) throw error
+      return { 
+        sessions: [data],
+        pagination: {
+          currentPage: 1,
+          pageSize: 1,
+          totalPages: 1,
+          totalCount: 1,
+          hasMore: false
+        }
+      }
     } catch (error) {
       console.error('[Redis] Error fetching dialogue sessions:', error)
+      return null
+    }
+  }
+
+  async getDialogueSessionsWithPagination(
+    userId: string, 
+    dialogueId: string, 
+    page: number, 
+    pageSize: number
+  ): Promise<{
+    sessions: DialogueSession[]
+    pagination: {
+      currentPage: number
+      pageSize: number
+      totalPages: number
+      totalItems: number
+    }
+  } | null> {
+    try {
+      const { data, error } = await supabase
+        .from('dialogue_sessions')
+        .select('*')
+        .eq('session_id', `${userId}:${dialogueId}`)
+        .range((page - 1) * pageSize, page * pageSize - 1)
+
+      if (error) throw error
+      const count = await supabase
+        .from('dialogue_sessions')
+        .select('id', { count: 'exact' })
+        .eq('session_id', `${userId}:${dialogueId}`)
+        .single()
+
+      return { 
+        sessions: data || [],
+        pagination: {
+          currentPage: page,
+          pageSize: pageSize,
+          totalPages: Math.ceil((count.count || 0) / pageSize),
+          totalItems: count.count || 0
+        }
+      }
+    } catch (error) {
+      console.error('[Redis] Error fetching dialogue sessions with pagination:', error)
       return null
     }
   }

@@ -1,0 +1,114 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Needed for Supabase
+  directUrl = env("DIRECT_URL")
+}
+
+enum RoleName {
+  ADMIN
+  USER
+  MODERATOR
+}
+
+enum Permission {
+  CREATE_DIALOGUE
+  EDIT_DIALOGUE
+  DELETE_DIALOGUE
+  PUBLISH_DIALOGUE
+  MANAGE_USERS
+  MANAGE_ROLES
+}
+
+model Role {
+  id          String     @id @default(uuid())
+  name        RoleName   @unique
+  permissions Permission[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  userRoles   UserRole[]
+}
+
+model UserRole {
+  id          String   @id @default(uuid())
+  userId      String   // Clerk user ID
+  roleId      String
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedBy  String   // Clerk user ID of the assigner
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, roleId])
+  @@index([userId])
+}
+
+model Dialogue {
+  id          String   @id @default(uuid()) // Changed to uuid for Supabase
+  userId      String   // Clerk user ID
+  title       String
+  description String
+  status      String   @default("processing") // processing, completed, error
+  audioUrl    String?
+  genre       Genre    @default(OTHER)
+  hashtags    String[]
+  isPublished Boolean  @default(false)
+  error       String?
+  metadata    Json?    // For storing flexible metadata
+  plays       Int      @default(0)  // Track number of plays
+  lastPlayedAt DateTime?  // Track last played timestamp
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  characters DialogueCharacter[]
+  turns      DialogueTurn[]
+
+  @@index([userId])
+  @@index([genre, createdAt])
+  @@index([plays])  // Index for querying top played
+  @@index([lastPlayedAt])  // Index for querying recently played
+}
+
+model DialogueCharacter {
+  id          String    @id @default(uuid())
+  dialogueId  String
+  dialogue    Dialogue  @relation(fields: [dialogueId], references: [id], onDelete: Cascade)
+  customName  String
+  voiceId     String
+  voiceConfig Json      // Store voice settings
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  turns       DialogueTurn[]
+
+  @@unique([dialogueId, customName])
+}
+
+model DialogueTurn {
+  id          String    @id @default(uuid())
+  dialogueId  String
+  dialogue    Dialogue  @relation(fields: [dialogueId], references: [id], onDelete: Cascade)
+  characterId String
+  character   DialogueCharacter @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  text        String
+  audioUrl    String?
+  duration    Float?
+  order       Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([dialogueId, order])
+}
+
+enum Genre {
+  COMEDY
+  DRAMA
+  HORROR
+  ROMANCE
+  SCIFI
+  OTHER
+}

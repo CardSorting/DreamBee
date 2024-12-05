@@ -10,7 +10,8 @@ import {
   ChunkProcessingMetadata,
   DialogueChunkItem,
   MergedAudioData,
-  DialogueSession
+  DialogueSession,
+  DialogueGenre
 } from './types'
 
 const MANUAL_DIALOGUES_TABLE = 'nextjs-clerk-audio-records'
@@ -37,6 +38,10 @@ interface ManualDialogueData {
   metadata?: ChunkMetadata
   createdAt?: string
   updatedAt?: string
+  isPublished?: boolean
+  audioUrl?: string
+  hashtags?: string[]
+  genre?: DialogueGenre
 }
 
 interface PaginatedSessions {
@@ -165,6 +170,8 @@ export async function createManualDialogue(data: ManualDialogueData) {
       type: 'MANUAL_DIALOGUE',
       userId,
       dialogueId,
+      title: data.title,
+      description: data.description || '',
       status: data.status,
       isChunked: data.isChunked || false,
       metadata: {
@@ -178,8 +185,14 @@ export async function createManualDialogue(data: ManualDialogueData) {
       sessions: [],
       createdAt: now,
       updatedAt: now,
-      sortKey: now
+      sortKey: now,
+      isPublished: false,
+      audioUrl: '',
+      hashtags: [],
+      genre: 'Other'
     }
+
+    console.log('[Manual Dialogues] Creating item:', item)
 
     const command = new PutCommand({
       TableName: MANUAL_DIALOGUES_TABLE,
@@ -268,4 +281,63 @@ export async function getDialogueSessions(
       hasMore: endIndex < dialogue.sessions.length
     }
   }, 'Error getting dialogue sessions')
+}
+
+export async function updateDialogueStatus(
+  userId: string,
+  dialogueId: string,
+  updates: {
+    isPublished: boolean
+    title: string
+    description: string
+    genre: DialogueGenre
+    hashtags: string[]
+  }
+): Promise<void> {
+  console.log('[Manual Dialogues] Updating dialogue status:', {
+    userId,
+    dialogueId,
+    updates
+  })
+
+  const timestamp = new Date().toISOString()
+  const command = new UpdateCommand({
+    TableName: MANUAL_DIALOGUES_TABLE,
+    Key: {
+      pk: `USER#${userId}`,
+      sk: `MDLG#${dialogueId}`
+    },
+    UpdateExpression: `
+      SET #isPublished = :isPublished,
+          #title = :title,
+          #description = :description,
+          #genre = :genre,
+          #hashtags = :hashtags,
+          #updatedAt = :updatedAt
+    `,
+    ExpressionAttributeNames: {
+      '#isPublished': 'isPublished',
+      '#title': 'title',
+      '#description': 'description',
+      '#genre': 'genre',
+      '#hashtags': 'hashtags',
+      '#updatedAt': 'updatedAt'
+    },
+    ExpressionAttributeValues: {
+      ':isPublished': updates.isPublished,
+      ':title': updates.title,
+      ':description': updates.description,
+      ':genre': updates.genre,
+      ':hashtags': updates.hashtags,
+      ':updatedAt': timestamp
+    }
+  })
+
+  try {
+    await docClient.send(command)
+    console.log('[Manual Dialogues] Successfully updated dialogue status:', dialogueId)
+  } catch (err) {
+    console.error('[Manual Dialogues] Error updating dialogue status:', err)
+    throw err
+  }
 }

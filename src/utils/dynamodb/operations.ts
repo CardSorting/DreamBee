@@ -2,7 +2,9 @@ import { UpdateCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
 import { docClient } from './client'
 import { UserDialogue, DialogueGenre } from './schema'
 
-const MANUAL_DIALOGUES_TABLE = 'nextjs-clerk-audio-records'
+const MANUAL_DIALOGUES_TABLE = process.env.DYNAMODB_TABLE || 'nextjs-clerk-audio-records'
+
+console.log('[DynamoDB Operations] Using table:', MANUAL_DIALOGUES_TABLE)
 
 interface PublishDialogueInput {
   userId: string
@@ -34,11 +36,14 @@ export async function publishDialogue({
 
   console.log('[DynamoDB] Looking up dialogue with key:', {
     pk: `USER#${userId}`,
-    sk: `MDLG#${dialogueId}`
+    sk: `MDLG#${dialogueId}`,
+    tableName: MANUAL_DIALOGUES_TABLE
   })
 
   const existingItem = await docClient.send(getCommand)
   console.log('[DynamoDB] GetItem response:', JSON.stringify(existingItem, null, 2))
+  console.log('[DynamoDB] GetItem Item:', existingItem.Item)
+  console.log('[DynamoDB] GetItem command:', JSON.stringify(getCommand.input, null, 2))
 
   if (!existingItem.Item) {
     throw new Error('Dialogue not found')
@@ -52,9 +57,21 @@ export async function publishDialogue({
       pk: `USER#${userId}`,
       sk: `MDLG#${dialogueId}`
     },
-    UpdateExpression: 'SET #status = :status, #publishedAt = :publishedAt, #title = :title, #description = :description, #genre = :genre, #hashtags = :hashtags, #gsi1pk = :gsi1pk, #gsi1sk = :gsi1sk, #updatedAt = :updatedAt, #type = :type, #isPublished = :isPublished',
+    UpdateExpression: `
+      SET #type = :type,
+          #isPublished = :isPublished,
+          #publishedAt = :publishedAt,
+          #title = :title,
+          #description = :description,
+          #genre = :genre,
+          #hashtags = :hashtags,
+          #gsi1pk = :gsi1pk,
+          #gsi1sk = :gsi1sk,
+          #updatedAt = :updatedAt
+    `,
     ExpressionAttributeNames: {
-      '#status': 'status',
+      '#type': 'type',
+      '#isPublished': 'isPublished',
       '#publishedAt': 'publishedAt',
       '#title': 'title',
       '#description': 'description',
@@ -62,12 +79,11 @@ export async function publishDialogue({
       '#hashtags': 'hashtags',
       '#gsi1pk': 'gsi1pk',
       '#gsi1sk': 'gsi1sk',
-      '#updatedAt': 'updatedAt',
-      '#type': 'type',
-      '#isPublished': 'isPublished'
+      '#updatedAt': 'updatedAt'
     },
     ExpressionAttributeValues: {
-      ':status': 'published',
+      ':type': 'PUBLISHED_DIALOGUE',
+      ':isPublished': true,
       ':publishedAt': timestamp,
       ':title': title,
       ':description': description,
@@ -75,14 +91,13 @@ export async function publishDialogue({
       ':hashtags': hashtags,
       ':gsi1pk': `GENRE#${genre}`,
       ':gsi1sk': timestamp,
-      ':updatedAt': timestamp,
-      ':type': 'PUBLISHED_DIALOGUE',
-      ':isPublished': true
+      ':updatedAt': timestamp
     }
   })
 
+  console.log('[DynamoDB] Publishing dialogue with command:', JSON.stringify(updateCommand.input, null, 2))
+
   try {
-    console.log('[DynamoDB] Updating dialogue with command:', JSON.stringify(updateCommand, null, 2))
     await docClient.send(updateCommand)
     console.log('[DynamoDB] Update successful')
   } catch (err: unknown) {

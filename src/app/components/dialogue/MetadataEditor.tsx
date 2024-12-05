@@ -1,12 +1,15 @@
 'use client'
 
-import { DIALOGUE_GENRES, DialogueGenre } from '@/utils/dynamodb/types'
+import { Genre } from '@prisma/client'
+
+// Define available genres from the Prisma enum
+const AVAILABLE_GENRES = Object.values(Genre)
 
 interface MetadataEditorProps {
   title: string
-  genre: DialogueGenre
+  genre: Genre
   onUpdateTitle: (title: string) => void
-  onUpdateGenre: (genre: DialogueGenre) => void
+  onUpdateGenre: (genre: Genre) => void
   // Optional props for extended functionality
   description?: string
   hashtags?: string[]
@@ -30,6 +33,11 @@ export function MetadataEditor({
   onAddHashtag = () => {},
   onRemoveHashtag = () => {}
 }: MetadataEditorProps) {
+  // Function to format genre for display
+  const formatGenre = (g: Genre) => {
+    return g.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -67,12 +75,12 @@ export function MetadataEditor({
         <select
           id="genre"
           value={genre}
-          onChange={(e) => onUpdateGenre(e.target.value as DialogueGenre)}
+          onChange={(e) => onUpdateGenre(e.target.value as Genre)}
           className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
         >
-          {DIALOGUE_GENRES.map((g) => (
+          {AVAILABLE_GENRES.map((g) => (
             <option key={g} value={g}>
-              {g}
+              {formatGenre(g)}
             </option>
           ))}
         </select>
@@ -101,7 +109,6 @@ export function MetadataEditor({
           </div>
           <div className="flex gap-2">
             <input
-              id="hashtags"
               type="text"
               value={hashtagInput}
               onChange={(e) => onUpdateHashtagInput(e.target.value)}
@@ -112,12 +119,12 @@ export function MetadataEditor({
                 }
               }}
               className="flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              placeholder="Add hashtag (press Enter)"
+              placeholder="Add hashtag"
             />
             <button
               type="button"
               onClick={onAddHashtag}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
             >
               Add
             </button>
