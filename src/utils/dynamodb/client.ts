@@ -46,13 +46,13 @@ function validateAWSCredentials() {
 }
 
 // Initialize clients only if we're on the server side
-const { docClient, rawClient } = (() => {
+const { ddbClient, docClient } = (() => {
   if (typeof window !== 'undefined') {
     const errorMsg = 'DynamoDB client can only be accessed server-side'
     const throwError = () => { throw new Error(errorMsg) }
     return {
-      docClient: { send: throwError } as unknown as DynamoDBDocumentClient,
-      rawClient: { send: throwError } as unknown as DynamoDBClient
+      ddbClient: { send: throwError } as unknown as DynamoDBClient,
+      docClient: { send: throwError } as unknown as DynamoDBDocumentClient
     }
   }
 
@@ -104,11 +104,11 @@ const { docClient, rawClient } = (() => {
     })
 
     console.log('[DynamoDB] Client initialized successfully')
-    return { docClient: documentClient, rawClient: rawDynamoDBClient }
+    return { ddbClient: rawDynamoDBClient, docClient: documentClient }
   } catch (error) {
     console.error('[DynamoDB] Error initializing client:', error)
     throw error
   }
 })()
 
-export { docClient, rawClient }
+export { ddbClient, docClient }

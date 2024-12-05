@@ -13,7 +13,8 @@
     "test-dialogue": "node scripts/test-dialogue.js",
     "setup-mediaconvert": "node scripts/setup-mediaconvert.js",
     "create-table": "node scripts/create-dynamodb-table.js",
-    "delete-table": "node scripts/delete-dynamodb-table.js"
+    "delete-table": "node scripts/delete-dynamodb-table.js",
+    "update-table": "node scripts/update-table.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

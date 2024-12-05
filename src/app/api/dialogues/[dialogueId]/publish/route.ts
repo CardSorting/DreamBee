@@ -2,28 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@clerk/nextjs/server'
 import { publishDialogue, unpublishDialogue } from '../../../../../utils/dynamodb/operations'
 import { DIALOGUE_GENRES } from '../../../../../utils/dynamodb/types'
-import { DynamoDB } from 'aws-sdk'
-import { S3 } from 'aws-sdk'
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 
-const s3 = new S3({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
-})
-
-const dynamoDB = new DynamoDB.DocumentClient({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
-})
+const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION })
+const docClient = DynamoDBDocumentClient.from(ddbClient)
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { dialogueId: string } }
+  context: { params: { dialogueId: string } }
 ) {
   try {
     const { userId } = getAuth(request)
@@ -35,10 +22,10 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { dialogueId } = params
+    const dialogueId = await context.params.dialogueId
 
     // Validate required fields
-    const requiredFields = ['genre', 'title', 'description', 'hashtags', 'metadata']
+    const requiredFields = ['genre', 'title', 'description', 'hashtags']
     for (const field of requiredFields) {
       if (!body[field]) {
         return new NextResponse(
@@ -56,56 +43,24 @@ export async function POST(
       )
     }
 
-    // Get the audio record from DynamoDB
-    const audioRecord = await dynamoDB.get({
-      TableName: process.env.DYNAMODB_TABLE!,
-      Key: {
-        PK: `USER#${userId}`,
-        SK: `AUDIO#${dialogueId}`
-      }
-    }).promise()
-
-    if (!audioRecord.Item) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Audio record not found' }),
-        { status: 404 }
-      )
-    }
-
-    // The S3 URL should already be stored in the audio record
-    const audioUrl = audioRecord.Item.audioUrl
-
-    if (!audioUrl) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Audio URL not found in record' }),
-        { status: 404 }
-      )
-    }
-
-    // Publish the dialogue with the audio URL from the record
-    const publishedDialogue = await publishDialogue({
+    // Publish the dialogue
+    await publishDialogue({
       userId,
       dialogueId,
       genre: body.genre,
       title: body.title,
       description: body.description,
-      hashtags: body.hashtags,
-      audioUrl,
-      metadata: {
-        ...body.metadata,
-        ...(audioRecord.Item.metadata || {})
-      },
-      transcript: audioRecord.Item.transcript
+      hashtags: body.hashtags
     })
 
-    return NextResponse.json({ dialogue: publishedDialogue })
-  } catch (error) {
-    console.error('Error publishing dialogue:', error)
     return new NextResponse(
-      JSON.stringify({ 
-        error: 'Failed to publish dialogue',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }),
+      JSON.stringify({ success: true }),
+      { status: 200 }
+    )
+  } catch (error) {
+    console.error('Error in publish route:', error)
+    return new NextResponse(
+      JSON.stringify({ error: 'Failed to publish dialogue' }),
       { status: 500 }
     )
   }
@@ -113,7 +68,7 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { dialogueId: string } }
+  context: { params: { dialogueId: string } }
 ) {
   try {
     const { userId } = getAuth(request)
@@ -124,26 +79,17 @@ export async function DELETE(
       )
     }
 
-    const { dialogueId } = params
-    const body = await request.json()
-    const { genre } = body
+    const dialogueId = await context.params.dialogueId
+    await unpublishDialogue(userId, dialogueId)
 
-    if (!genre) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Genre is required' }),
-        { status: 400 }
-      )
-    }
-
-    await unpublishDialogue(userId, dialogueId, genre)
-    return new NextResponse(null, { status: 204 })
-  } catch (error) {
-    console.error('Error unpublishing dialogue:', error)
     return new NextResponse(
-      JSON.stringify({ 
-        error: 'Failed to unpublish dialogue',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }),
+      JSON.stringify({ success: true }),
+      { status: 200 }
+    )
+  } catch (error) {
+    console.error('Error in unpublish route:', error)
+    return new NextResponse(
+      JSON.stringify({ error: 'Failed to unpublish dialogue' }),
       { status: 500 }
     )
   }
