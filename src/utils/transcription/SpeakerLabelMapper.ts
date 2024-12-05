@@ -2,15 +2,20 @@ import { TranscriptionResponse, AssemblyAIUtterance, AssemblyAIWord } from '../t
 
 export class SpeakerLabelMapper {
   private speakerNames: string[]
+  private speakerMap: Map<string, string>
 
   constructor(speakerNames: string[] = []) {
     this.speakerNames = speakerNames
+    this.speakerMap = new Map()
   }
 
   mapSpeakersToCharacters(response: TranscriptionResponse): TranscriptionResponse {
     if (!this.speakerNames.length) {
       return response
     }
+
+    // Initialize speaker mapping
+    this.initializeSpeakerMap(response)
 
     // Map utterances
     const mappedUtterances = response.utterances?.map(utterance => 
@@ -22,7 +27,7 @@ export class SpeakerLabelMapper {
       this.mapWordSpeaker(word)
     )
 
-    // Extract unique speakers
+    // Extract unique speakers (now using character names)
     const speakerSet = new Set<string>()
     mappedUtterances.forEach(utterance => {
       if (utterance.speaker) {
@@ -38,11 +43,32 @@ export class SpeakerLabelMapper {
     }
   }
 
+  private initializeSpeakerMap(response: TranscriptionResponse) {
+    // Clear existing mapping
+    this.speakerMap.clear()
+
+    // Get unique speakers from the response
+    const uniqueSpeakers = new Set<string>()
+    response.utterances?.forEach(utterance => {
+      if (utterance.speaker) {
+        uniqueSpeakers.add(utterance.speaker)
+      }
+    })
+
+    // Sort speakers to ensure consistent mapping
+    const sortedSpeakers = Array.from(uniqueSpeakers).sort()
+
+    // Map each speaker to a character name
+    sortedSpeakers.forEach((speaker, index) => {
+      if (index < this.speakerNames.length) {
+        this.speakerMap.set(speaker, this.speakerNames[index])
+      }
+    })
+  }
+
   private mapUtteranceSpeaker(utterance: AssemblyAIUtterance): AssemblyAIUtterance {
-    const speakerIndex = utterance.speaker ? 
-      parseInt(utterance.speaker.replace('Speaker ', '')) - 1 : null
-    const characterName = speakerIndex !== null ? 
-      this.speakerNames[speakerIndex] : null
+    const characterName = utterance.speaker ? 
+      this.speakerMap.get(utterance.speaker) || utterance.speaker : null
 
     return {
       ...utterance,
@@ -55,12 +81,12 @@ export class SpeakerLabelMapper {
   }
 
   private mapWordSpeaker(word: AssemblyAIWord): AssemblyAIWord {
-    const speakerIndex = word.speaker ? 
-      parseInt(word.speaker.replace('Speaker ', '')) - 1 : null
+    const characterName = word.speaker ? 
+      this.speakerMap.get(word.speaker) || word.speaker : null
     
     return {
       ...word,
-      speaker: speakerIndex !== null ? this.speakerNames[speakerIndex] : null
+      speaker: characterName
     }
   }
 }
