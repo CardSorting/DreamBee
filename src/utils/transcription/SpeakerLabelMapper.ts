@@ -6,7 +6,7 @@ export class SpeakerLabelMapper {
   }
 
   mapSpeakersToCharacters(response: TranscriptionResponse): TranscriptionResponse {
-    const GENERIC_SPEAKER = 'Person speaking'
+    const GENERIC_SPEAKER = 'Bees Buzzing'
 
     // Map utterances
     const mappedUtterances = response.utterances?.map(utterance => ({

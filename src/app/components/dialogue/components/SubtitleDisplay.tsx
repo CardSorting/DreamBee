@@ -18,7 +18,7 @@ const SubtitleDisplay: React.FC<SubtitleDisplayProps> = ({
       <div className={styleManager.getWrapperStyles()}>
         <div className={styleManager.getSubtitleStyles('current')}>
           <div className={styleManager.getSpeakerStyles('current')}>
-            {currentCue?.speaker || 'Person speaking'}
+            {currentCue?.speaker || 'Bees Buzzing'}
           </div>
           <div className={styleManager.getTextStyles('current')}>
             {currentCue?.text || ''}
@@ -28,7 +28,7 @@ const SubtitleDisplay: React.FC<SubtitleDisplayProps> = ({
         {nextCue && (
           <div className={styleManager.getSubtitleStyles('next')}>
             <div className={styleManager.getSpeakerStyles('next')}>
-              {nextCue.speaker || 'Person speaking'}
+              {nextCue.speaker || 'Bees Buzzing'}
             </div>
             <div className={styleManager.getTextStyles('next')}>
               {nextCue.text}

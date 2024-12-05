@@ -47,7 +47,7 @@ const createEmptySubtitle = (id: string): Subtitle => ({
   text: '',
   start: 0,
   end: 0,
-  speaker: 'Speaker',
+  speaker: 'Bees Buzzing',
   words: []
 })
 
@@ -133,7 +133,7 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
             start: sub.start,
             end: sub.end,
             words: sub.words || [],
-            speaker: sub.speaker || result.audioUrls[index]?.character || 'Speaker'
+            speaker: sub.speaker || result.audioUrls[index]?.character || 'Bees Buzzing'
           }))
           setSubtitles(processedSubtitles)
         }
@@ -188,13 +188,13 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
           text: currentSubtitle.text,
           startTime: currentSubtitle.start / 1000, // Convert to seconds
           endTime: currentSubtitle.end / 1000, // Convert to seconds
-          speaker: currentSubtitle.speaker || 'Speaker'
+          speaker: currentSubtitle.speaker || 'Bees Buzzing'
         } as Cue : null}
         nextCue={nextSubtitle ? {
           text: nextSubtitle.text,
           startTime: nextSubtitle.start / 1000, // Convert to seconds
           endTime: nextSubtitle.end / 1000, // Convert to seconds
-          speaker: nextSubtitle.speaker || 'Speaker'
+          speaker: nextSubtitle.speaker || 'Bees Buzzing'
         } as Cue : null}
       />
       
