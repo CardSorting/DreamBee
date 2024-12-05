@@ -1,4 +1,5 @@
-import { UpdateCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+import { UpdateCommand, GetCommand, QueryCommand, GetCommandInput } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, GetCommand as DocumentGetCommand } from '@aws-sdk/lib-dynamodb'
 import { docClient } from './client'
 import { UserDialogue, DialogueGenre } from './schema'
 
@@ -89,6 +90,19 @@ export async function publishDialogue({
     console.error('[DynamoDB] Error publishing dialogue:', err)
     throw new Error(err instanceof Error ? err.message : 'Failed to publish dialogue')
   }
+}
+
+export async function getDialogue(userId: string, dialogueId: string) {
+  const getCommand = new GetCommand({
+    TableName: MANUAL_DIALOGUES_TABLE,
+    Key: {
+      pk: `USER#${userId}`,
+      sk: `MDLG#${dialogueId}`
+    }
+  })
+
+  const result = await docClient.send(getCommand)
+  return result.Item
 }
 
 export async function unpublishDialogue(userId: string, dialogueId: string): Promise<void> {

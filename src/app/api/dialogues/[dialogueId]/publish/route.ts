@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuth } from '@clerk/nextjs/server'
-import { publishDialogue, unpublishDialogue } from '@/utils/dynamodb/operations'
-import { DIALOGUE_GENRES } from '@/utils/dynamodb/types'
+import { PublishingService } from '@/utils/publishing/PublishingService'
+import { PublishingMetadata } from '@/utils/publishing/types'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION })
 const docClient = DynamoDBDocumentClient.from(ddbClient)
 
+const publishingService = new PublishingService()
+
 export async function POST(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: { dialogueId: string } }
 ) {
   try {
-    const { userId } = getAuth(request)
+    const { userId } = getAuth(req)
     if (!userId) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -21,45 +23,30 @@ export async function POST(
       )
     }
 
-    const { dialogueId } = await params
-    const body = await request.json()
+    const metadata: PublishingMetadata = await req.json()
+    const result = await publishingService.publishDialogue(userId, params.dialogueId, metadata)
 
-    console.log('Publishing dialogue:', { userId, dialogueId })
+    return NextResponse.json(result)
+  } catch (error: any) {
+    console.error('Error in publish route:', error)
 
-    // Validate required fields
-    const requiredFields = ['genre', 'title', 'description', 'hashtags']
-    for (const field of requiredFields) {
-      if (!body[field]) {
-        return NextResponse.json(
-          { error: `Missing required field: ${field}` },
-          { status: 400 }
-        )
-      }
-    }
+    if (error.code) {
+      // Handle known publishing errors
+      const statusCode = {
+        'NOT_FOUND': 404,
+        'ALREADY_PUBLISHED': 409,
+        'VALIDATION_ERROR': 400,
+        'INTERNAL_ERROR': 500
+      }[error.code] || 500
 
-    // Validate genre
-    if (!DIALOGUE_GENRES.includes(body.genre)) {
       return NextResponse.json(
-        { error: 'Invalid genre' },
-        { status: 400 }
+        { error: error.message },
+        { status: statusCode }
       )
     }
 
-    // Publish the dialogue
-    await publishDialogue({
-      userId,
-      dialogueId,
-      genre: body.genre,
-      title: body.title,
-      description: body.description,
-      hashtags: body.hashtags
-    })
-
-    return NextResponse.json({ message: 'Dialogue published successfully' })
-  } catch (error) {
-    console.error('Error in publish route:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to publish dialogue' },
+      { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }

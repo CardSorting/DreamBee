@@ -32,16 +32,13 @@ function validateAWSCredentials() {
     .map(([key]) => key)
 
   if (missingVars.length > 0) {
-    const errorMessage = `Missing AWS environment variables: ${missingVars.join(', ')}. ` +
-      'Ensure these are set in .env.local and the application is running server-side.'
-    console.error('[DynamoDB] ' + errorMessage)
-    throw new Error(errorMessage)
+    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`)
   }
 
   return {
-    region: process.env.AWS_REGION!,
     accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+    region: process.env.AWS_REGION!
   }
 }
 
@@ -49,7 +46,9 @@ function validateAWSCredentials() {
 const { ddbClient, docClient } = (() => {
   if (typeof window !== 'undefined') {
     const errorMsg = 'DynamoDB client can only be accessed server-side'
-    const throwError = () => { throw new Error(errorMsg) }
+    const throwError = () => {
+      throw new Error(errorMsg)
+    }
     return {
       ddbClient: { send: throwError } as unknown as DynamoDBClient,
       docClient: { send: throwError } as unknown as DynamoDBDocumentClient
@@ -58,43 +57,29 @@ const { ddbClient, docClient } = (() => {
 
   try {
     console.log('[DynamoDB] Initializing client...')
+
     const credentials = validateAWSCredentials()
-    
+
+    // Create logger
+    const logger = {
+      debug: (...args: unknown[]) => console.debug('[DynamoDB]', ...args),
+      info: (...args: unknown[]) => console.info('[DynamoDB]', ...args),
+      warn: (...args: unknown[]) => console.warn('[DynamoDB]', ...args),
+      error: (...args: unknown[]) => console.error('[DynamoDB]', ...args)
+    }
+
     const rawDynamoDBClient = new DynamoDBClient({
       region: credentials.region,
       credentials: {
         accessKeyId: credentials.accessKeyId,
         secretAccessKey: credentials.secretAccessKey
       },
-      maxAttempts: 3,
-      retryMode: 'standard',
-      logger: {
-        debug: (...args) => console.debug('[DynamoDB]', ...args),
-        info: (...args) => console.info('[DynamoDB]', ...args),
-        warn: (...args) => console.warn('[DynamoDB]', ...args),
-        error: (...args) => console.error('[DynamoDB]', ...args)
-      }
+      logger
     })
 
-    const client = new DynamoDBClient({
-      region: credentials.region,
-      credentials: {
-        accessKeyId: credentials.accessKeyId,
-        secretAccessKey: credentials.secretAccessKey
-      },
-      maxAttempts: 3,
-      retryMode: 'standard',
-      logger: {
-        debug: (...args) => console.debug('[DynamoDB]', ...args),
-        info: (...args) => console.info('[DynamoDB]', ...args),
-        warn: (...args) => console.warn('[DynamoDB]', ...args),
-        error: (...args) => console.error('[DynamoDB]', ...args)
-      }
-    })
-
-    const documentClient = DynamoDBDocumentClient.from(client, {
+    const documentClient = DynamoDBDocumentClient.from(rawDynamoDBClient, {
       marshallOptions: {
-        convertEmptyValues: true,
+        convertEmptyValues: false,
         removeUndefinedValues: true,
         convertClassInstanceToMap: true
       },
