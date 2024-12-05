@@ -2,14 +2,38 @@ import React, { useEffect, useRef, useState } from 'react';
 import { PlayIcon, PauseIcon } from '@heroicons/react/24/solid';
 import { ProgressBar } from './ProgressBar';
 
+interface AudioTranscript {
+  srt: string;
+  vtt: string;
+  json: {
+    subtitles: Array<{
+      text: string;
+      start: number;
+      end: number;
+      words?: Array<{
+        text: string;
+        start: number;
+        end: number;
+        confidence: number;
+        speaker?: string | null;
+      }>;
+      speaker?: string | null;
+    }>;
+  };
+}
+
 interface SimpleAudioPlayerProps {
   audioUrl: string;
+  transcript?: AudioTranscript;
+  onPlay?: () => void;
   onTimeUpdate?: (currentTime: number) => void;
   onEnded?: () => void;
 }
 
 export const SimpleAudioPlayer: React.FC<SimpleAudioPlayerProps> = ({
   audioUrl,
+  transcript,
+  onPlay,
   onTimeUpdate,
   onEnded,
 }) => {
@@ -49,21 +73,24 @@ export const SimpleAudioPlayer: React.FC<SimpleAudioPlayerProps> = ({
   }, [onTimeUpdate, onEnded]);
 
   const togglePlayPause = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play();
+      onPlay?.();
     }
+    setIsPlaying(!isPlaying);
   };
 
   const handleSeek = (time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.currentTime = time;
+    setCurrentTime(time);
   };
 
   const progress = duration ? (currentTime / duration) * 100 : 0;

@@ -100,7 +100,7 @@ export function DialogueCard({ dialogue }: DialogueCardProps) {
         <SimpleAudioPlayer
           audioUrl={dialogue.audioUrl}
           transcript={dialogue.transcript}
-          onPlay={handlePlay}
+          onPlay={() => handlePlay()}
         />
       </div>
       <div className="flex gap-4 mt-4 text-sm text-gray-500">
