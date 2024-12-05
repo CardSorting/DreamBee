@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { AssemblyAI, Transcript } from 'assemblyai'
+import { AssemblyAI } from 'assemblyai'
 import axios from 'axios'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
@@ -8,6 +8,7 @@ import { getAuth } from '@clerk/nextjs/server'
 import { nanoid } from 'nanoid'
 import { TranscriptionProcessor } from '@/utils/transcription/TranscriptionProcessor'
 import { SpeakerLabelMapper } from '@/utils/transcription/SpeakerLabelMapper'
+import { TranscriptFormatter } from '@/utils/transcription/TranscriptFormatter'
 import { TranscriptionResponse, TranscriptionOptions } from '@/utils/types/transcription'
 
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY
@@ -104,8 +105,8 @@ export async function POST(req: NextRequest) {
       response = speakerMapper.mapSpeakersToCharacters(response)
     }
 
-    // Clean response for storage
-    const cleanResponse = transcriptionProcessor.cleanTranscriptionResponse(response)
+    // Format transcript for DynamoDB
+    const { metadata, transcript } = TranscriptFormatter.formatForDynamoDB(response)
 
     // Save to DynamoDB
     await docClient.send(new PutCommand({
@@ -113,12 +114,13 @@ export async function POST(req: NextRequest) {
       Item: {
         PK: `USER#${userId}`,
         SK: `AUDIO#${audioId}`,
+        type: 'audio',
         userId,
         audioId,
         audioUrl: s3Url,
-        transcript: cleanResponse,
-        createdAt: new Date().toISOString(),
-        type: 'audio'
+        metadata,
+        transcript,
+        createdAt: new Date().toISOString()
       }
     }))
 
