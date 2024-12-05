@@ -68,9 +68,9 @@ export interface Subtitle {
 }
 
 export interface SubtitleDisplayProps {
-  currentSubtitle: Subtitle
-  nextSubtitle: Subtitle | null
-  currentTime: number
+  currentCue: import('./VTTParser').Cue | null
+  nextCue: import('./VTTParser').Cue | null
+  styleManager?: any
 }
 
 export interface ProgressBarProps {

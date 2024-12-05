@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, memo } from 'react'
 import { getWebAudioMerger } from '../../../utils/web-audio-merger'
 import { TimeFormatter } from './utils/TimeFormatter'
 import { AudioPreviewProps, Subtitle } from './utils/types'
+import { Cue } from './utils/VTTParser'
 import { PlayButton } from './components/PlayButton'
 import { ProgressBar } from './components/ProgressBar'
 import SubtitleDisplay from './components/SubtitleDisplay'
@@ -182,13 +183,20 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
   return (
     <div className="w-full space-y-4">
       {/* Subtitle Display */}
-      {subtitles.length > 0 && currentSubtitle && (
-        <SubtitleDisplay
-          currentSubtitle={currentSubtitle}
-          nextSubtitle={nextSubtitle}
-          currentTime={0}
-        />
-      )}
+      <SubtitleDisplay
+        currentCue={currentSubtitle ? {
+          text: currentSubtitle.text,
+          startTime: currentSubtitle.start / 1000, // Convert to seconds
+          endTime: currentSubtitle.end / 1000, // Convert to seconds
+          speaker: currentSubtitle.speaker || 'Speaker'
+        } as Cue : null}
+        nextCue={nextSubtitle ? {
+          text: nextSubtitle.text,
+          startTime: nextSubtitle.start / 1000, // Convert to seconds
+          endTime: nextSubtitle.end / 1000, // Convert to seconds
+          speaker: nextSubtitle.speaker || 'Speaker'
+        } as Cue : null}
+      />
       
       {/* Audio Player */}
       <SimpleAudioPlayer

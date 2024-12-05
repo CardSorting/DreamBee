@@ -38,7 +38,7 @@ export class SubtitleStyleManager {
     const themeStyles = this.theme[type]
     const baseStyles = [
       themeStyles.background,
-      'p-4 rounded-lg transition-all duration-300 ease-in-out w-full min-h-[100px] flex flex-col'
+      'p-4 rounded-lg w-full min-h-[80px] flex flex-col transition-all duration-300 ease-in-out'
     ]
 
     if (type === 'next') {
@@ -49,18 +49,18 @@ export class SubtitleStyleManager {
   }
 
   getSpeakerStyles(type: 'current' | 'next'): string {
-    return `${this.theme[type].speaker} text-sm`
+    return `${this.theme[type].speaker} text-sm mb-2`
   }
 
   getTextStyles(type: 'current' | 'next'): string {
-    return `${this.theme[type].text} break-words text-base leading-relaxed flex-grow`
+    return `${this.theme[type].text} break-words text-base leading-relaxed flex-grow min-h-[24px]`
   }
 
   getContainerStyles(): string {
-    return 'relative h-[400px] overflow-hidden bg-white'
+    return 'relative h-[200px] bg-white border border-gray-100 rounded-lg shadow-sm'
   }
 
   getWrapperStyles(): string {
-    return 'absolute inset-0 flex flex-col space-y-4 overflow-y-auto px-3 py-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent'
+    return 'h-full flex flex-col space-y-4 overflow-y-auto px-3 py-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent'
   }
 }
