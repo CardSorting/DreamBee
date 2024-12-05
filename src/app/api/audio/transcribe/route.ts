@@ -160,12 +160,31 @@ export async function POST(req: NextRequest) {
 
     // Map speaker labels to character names if provided
     if (response.utterances && options?.speakerNames && options.speakerNames.length > 0) {
-      response.utterances = response.utterances.map(utterance => ({
-        ...utterance,
-        speaker: utterance.speaker && options.speakerNames[parseInt(utterance.speaker.replace('Speaker ', '')) - 1]
-      }))
+      // First, map the utterances
+      response.utterances = response.utterances.map(utterance => {
+        const speakerIndex = utterance.speaker ? parseInt(utterance.speaker.replace('Speaker ', '')) - 1 : null
+        const characterName = speakerIndex !== null ? options.speakerNames[speakerIndex] : null
+        
+        return {
+          ...utterance,
+          speaker: characterName,
+          words: utterance.words?.map(word => ({
+            ...word,
+            speaker: characterName
+          }))
+        }
+      })
+
+      // Also map the words array
+      response.words = response.words.map(word => {
+        const speakerIndex = word.speaker ? parseInt(word.speaker.replace('Speaker ', '')) - 1 : null
+        return {
+          ...word,
+          speaker: speakerIndex !== null ? options.speakerNames[speakerIndex] : null
+        }
+      })
       
-      // Extract unique speakers
+      // Extract unique speakers (now character names)
       const speakerSet = new Set<string>()
       response.utterances.forEach(utterance => {
         if (utterance.speaker) {

@@ -34,8 +34,8 @@ export async function POST(
       )
     }
 
-    const { dialogueId } = params
     const body = await request.json()
+    const { dialogueId } = params
 
     // Validate required fields
     const requiredFields = ['genre', 'title', 'description', 'hashtags', 'metadata']
@@ -60,8 +60,8 @@ export async function POST(
     const audioRecord = await dynamoDB.get({
       TableName: process.env.DYNAMODB_TABLE!,
       Key: {
-        pk: `USER#${userId}`,
-        sk: `AUDIO#${dialogueId}`
+        PK: `USER#${userId}`,
+        SK: `AUDIO#${dialogueId}`
       }
     }).promise()
 
@@ -73,7 +73,7 @@ export async function POST(
     }
 
     // The S3 URL should already be stored in the audio record
-    const audioUrl = audioRecord.Item.s3Url
+    const audioUrl = audioRecord.Item.audioUrl
 
     if (!audioUrl) {
       return new NextResponse(
@@ -93,7 +93,7 @@ export async function POST(
       audioUrl,
       metadata: {
         ...body.metadata,
-        ...audioRecord.Item.metadata,
+        ...(audioRecord.Item.metadata || {})
       },
       transcript: audioRecord.Item.transcript
     })
@@ -125,7 +125,8 @@ export async function DELETE(
     }
 
     const { dialogueId } = params
-    const { genre } = await request.json()
+    const body = await request.json()
+    const { genre } = body
 
     if (!genre) {
       return new NextResponse(
