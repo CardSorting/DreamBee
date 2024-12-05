@@ -17,7 +17,7 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<vo
   
   // First, get the existing dialogue
   const getCommand = new GetItemCommand({
-    TableName: process.env.DYNAMODB_TABLE,
+    TableName: process.env.DYNAMODB_TABLE!,
     Key: marshall({
       pk: `USER#${params.userId}`,
       sk: `DIALOGUE#${params.dialogueId}`
@@ -31,12 +31,12 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<vo
 
   // Update the dialogue with published status and metadata
   const updateCommand = new UpdateItemCommand({
-    TableName: process.env.DYNAMODB_TABLE,
+    TableName: process.env.DYNAMODB_TABLE!,
     Key: marshall({
       pk: `USER#${params.userId}`,
       sk: `DIALOGUE#${params.dialogueId}`
     }),
-    UpdateExpression: 'SET #status = :status, #publishedAt = :publishedAt, #title = :title, #description = :description, #genre = :genre, #hashtags = :hashtags, #gsi1pk = :gsi1pk, #gsi1sk = :gsi1sk, #updatedAt = :updatedAt',
+    UpdateExpression: 'SET #status = :status, #publishedAt = :publishedAt, #title = :title, #description = :description, #genre = :genre, #hashtags = :hashtags, #gsi1pk = :gsi1pk, #gsi1sk = :gsi1sk, #updatedAt = :updatedAt, #type = :type, #isPublished = :isPublished',
     ExpressionAttributeNames: {
       '#status': 'status',
       '#publishedAt': 'publishedAt',
@@ -46,7 +46,9 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<vo
       '#hashtags': 'hashtags',
       '#gsi1pk': 'gsi1pk',
       '#gsi1sk': 'gsi1sk',
-      '#updatedAt': 'updatedAt'
+      '#updatedAt': 'updatedAt',
+      '#type': 'type',
+      '#isPublished': 'isPublished'
     },
     ExpressionAttributeValues: marshall({
       ':status': 'published',
@@ -55,9 +57,11 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<vo
       ':description': params.description,
       ':genre': params.genre,
       ':hashtags': params.hashtags,
-      ':gsi1pk': `GENRE#${params.genre}`,
-      ':gsi1sk': `PUBLISHED#${timestamp}`,
-      ':updatedAt': timestamp
+      ':gsi1pk': `PUBLISHED#${params.genre}`,
+      ':gsi1sk': `DIALOGUE#${timestamp}#${params.dialogueId}`,
+      ':updatedAt': timestamp,
+      ':type': 'PUBLISHED_DIALOGUE',
+      ':isPublished': true
     })
   })
 
@@ -72,28 +76,31 @@ export async function publishDialogue(params: PublishDialogueParams): Promise<vo
 export async function unpublishDialogue(userId: string, dialogueId: string): Promise<void> {
   const timestamp = new Date().toISOString()
   
-  const command = new UpdateItemCommand({
-    TableName: process.env.DYNAMODB_TABLE,
+  const updateCommand = new UpdateItemCommand({
+    TableName: process.env.DYNAMODB_TABLE!,
     Key: marshall({
       pk: `USER#${userId}`,
       sk: `DIALOGUE#${dialogueId}`
     }),
-    UpdateExpression: 'SET #status = :status, #updatedAt = :updatedAt REMOVE #publishedAt, #gsi1pk, #gsi1sk',
+    UpdateExpression: 'REMOVE #gsi1pk, #gsi1sk SET #status = :status, #updatedAt = :updatedAt, #type = :type, #isPublished = :isPublished',
     ExpressionAttributeNames: {
       '#status': 'status',
-      '#updatedAt': 'updatedAt',
-      '#publishedAt': 'publishedAt',
       '#gsi1pk': 'gsi1pk',
-      '#gsi1sk': 'gsi1sk'
+      '#gsi1sk': 'gsi1sk',
+      '#updatedAt': 'updatedAt',
+      '#type': 'type',
+      '#isPublished': 'isPublished'
     },
     ExpressionAttributeValues: marshall({
-      ':status': 'draft',
-      ':updatedAt': timestamp
+      ':status': 'ready',
+      ':updatedAt': timestamp,
+      ':type': 'DIALOGUE',
+      ':isPublished': false
     })
   })
 
   try {
-    await ddbClient.send(command)
+    await ddbClient.send(updateCommand)
   } catch (err: unknown) {
     console.error('Error unpublishing dialogue:', err)
     throw new Error(err instanceof Error ? err.message : 'Failed to unpublish dialogue')
