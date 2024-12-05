@@ -132,7 +132,7 @@ export const AudioPreview = memo(({ result, onError }: AudioPreviewProps) => {
             start: sub.start,
             end: sub.end,
             words: sub.words || [],
-            speaker: sub.speaker || 'Speaker'
+            speaker: sub.speaker || result.audioUrls[index]?.character || 'Speaker'
           }))
           setSubtitles(processedSubtitles)
         }
